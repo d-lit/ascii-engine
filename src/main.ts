@@ -87,7 +87,7 @@ let pipeline: Pipeline | null = null;
 let lastWork: WorkBuffer | null = null;
 
 const input = new PointerInput(canvas, () => ({ cols: field?.cols ?? 1, rows: field?.rows ?? 1 }));
-const overlay = new DebugOverlay(stage, ['params', 'copy', 'cell', 'render', 'total']);
+const overlay = new DebugOverlay(stage, ['params', 'sample', 'cell', 'render', 'total']);
 const stageMs = new Float64Array(5);
 overlay.visible = false;
 
@@ -160,7 +160,7 @@ function frame(dt: number): void {
 
   const tm = pipeline.timings;
   stageMs[0] = tm.params;
-  stageMs[1] = tm.copy;
+  stageMs[1] = tm.sample;
   stageMs[2] = tm.cell;
   stageMs[3] = renderMs;
   stageMs[4] = tm.total + renderMs;

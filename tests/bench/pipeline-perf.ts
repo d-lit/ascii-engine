@@ -10,6 +10,12 @@ import { decode } from '../../src/effects/cell/decode.ts';
 import { erosion } from '../../src/effects/cell/erosion.ts';
 import { pulse } from '../../src/effects/cell/pulse.ts';
 import { wave } from '../../src/effects/cell/wave.ts';
+import { glitchRows } from '../../src/effects/displace/glitch-rows.ts';
+import { lens } from '../../src/effects/displace/lens.ts';
+import { liquid } from '../../src/effects/displace/liquid.ts';
+import { ripple } from '../../src/effects/displace/ripple.ts';
+import { shake } from '../../src/effects/displace/shake.ts';
+import { swirl } from '../../src/effects/displace/swirl.ts';
 import type { AnyEffectDef } from '../../src/effects/types.ts';
 import { createPointer, Pipeline } from '../../src/pipeline/pipeline.ts';
 
@@ -63,6 +69,14 @@ const cases: Array<[string, AnyEffectDef[]]> = [
   ['erosion', [erosion]],
   ['decode', [decode]],
   ['all four', [wave, pulse, erosion, decode]],
+  ['ripple', [ripple]],
+  ['swirl', [swirl]],
+  ['lens', [lens]],
+  ['liquid', [liquid]],
+  ['glitch', [glitchRows]],
+  ['shake', [shake]],
+  ['ripple+liquid+wave+erosion', [ripple, liquid, wave, erosion]],
+  ['all ten', [ripple, swirl, lens, liquid, glitchRows, shake, wave, pulse, erosion, decode]],
 ];
 
 // ONLY=<case name> runs a single case, e.g. with --trace-gc to count scavenges.
@@ -72,6 +86,6 @@ for (const [name, defs] of cases) {
   if (only !== undefined && name !== only) continue;
   const r = measure(defs);
   console.log(
-    `${name.padEnd(10)} median ${r.median.toFixed(2).padStart(6)} ms  p95 ${r.p95.toFixed(2).padStart(6)} ms`,
+    `${name.padEnd(28)} median ${r.median.toFixed(2).padStart(6)} ms  p95 ${r.p95.toFixed(2).padStart(6)} ms`,
   );
 }

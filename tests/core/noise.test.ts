@@ -54,3 +54,16 @@ describe('simplex lattice', () => {
     expect(n.noise3(0, 0, 0)).toBe(0);
   });
 });
+
+describe('fbm3io', () => {
+  it('matches fbm3 with default lacunarity and gain', () => {
+    const n = createNoise(3);
+    for (const s of samples.slice(0, 50)) {
+      n.io[0] = s[0]!;
+      n.io[1] = s[1]!;
+      n.io[2] = s[2]!;
+      n.fbm3io(3);
+      expect(n.io[3]).toBeCloseTo(n.fbm3(s[0]!, s[1]!, s[2]!, 3), 12);
+    }
+  });
+});

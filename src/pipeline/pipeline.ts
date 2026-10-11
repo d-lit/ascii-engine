@@ -7,7 +7,14 @@ import {
   type WorkBuffer,
 } from '../core/field.ts';
 import { createRand } from '../core/prng.ts';
-import type { AnyEffectDef, CellFn, CellRef, EffectInstance } from '../effects/types.ts';
+import type { Vec2 } from '../core/math.ts';
+import type {
+  AnyEffectDef,
+  CellFn,
+  CellRef,
+  DisplaceFn,
+  EffectInstance,
+} from '../effects/types.ts';
 import { createParamBag, resolveParams, type ParamBag, type ParamInput } from './params.ts';
 
 export const MAX_DT = 1 / 20;
@@ -27,7 +34,8 @@ export interface ChainEntry {
 /** Milliseconds spent per stage in the last frame. */
 export interface StageTimings {
   params: number;
-  copy: number;
+  /** source -> work: plain copy, or displaced bilinear sampling. */
+  sample: number;
   cell: number;
   total: number;
 }
@@ -42,13 +50,15 @@ export function createPointer(): Pointer {
  */
 export class Pipeline {
   readonly chain: ChainEntry[] = [];
-  readonly timings: StageTimings = { params: 0, copy: 0, cell: 0, total: 0 };
+  readonly timings: StageTimings = { params: 0, sample: 0, cell: 0, total: 0 };
   readonly ctx: FrameContext;
 
   private source: Field;
   private work: WorkBuffer;
   private seed: number;
   private cellFns: CellFn[] = [];
+  private displaceFns: DisplaceFn[] = [];
+  private readonly at: Vec2 = { x: 0, y: 0 };
   private readonly cell: CellRef = { lum: 0, alpha: 0, r: 0, g: 0, b: 0, char: 0 };
 
   constructor(source: Field, meta: FieldMeta, pointer: Pointer, seed = DEFAULT_SEED) {
@@ -149,7 +159,8 @@ export class Pipeline {
     }
     const t1 = performance.now();
 
-    copyFieldToWork(this.source, this.work);
+    if (this.displaceFns.length > 0) this.runDisplace();
+    else copyFieldToWork(this.source, this.work);
     const t2 = performance.now();
 
     if (this.cellFns.length > 0) this.runCells();
@@ -157,7 +168,7 @@ export class Pipeline {
 
     const tm = this.timings;
     tm.params = t1 - t0;
-    tm.copy = t2 - t1;
+    tm.sample = t2 - t1;
     tm.cell = t3 - t2;
     tm.total = t3 - t0;
 
@@ -170,13 +181,86 @@ export class Pipeline {
     resolveParams(entry.def.params, entry.keys, entry.values, this.ctx, entry.params);
   }
 
-  /** Flat list of enabled cell functions; rebuilt on chain edits, not per frame. */
+  /** Flat lists of enabled stage functions; rebuilt on chain edits, not per frame. */
   private rebuild(): void {
-    const fns: CellFn[] = [];
+    const cells: CellFn[] = [];
+    const displaces: DisplaceFn[] = [];
     for (const entry of this.chain) {
-      if (entry.enabled && entry.instance.kind === 'cell') fns.push(entry.instance.apply);
+      if (!entry.enabled) continue;
+      const inst = entry.instance;
+      if (inst.kind === 'cell') cells.push(inst.apply);
+      else if (inst.kind === 'displace') displaces.push(inst.apply);
     }
-    this.cellFns = fns;
+    this.cellFns = cells;
+    this.displaceFns = displaces;
+  }
+
+  /**
+   * Displace stage (SPEC 6.1): every displace fn moves the sample point in
+   * turn, then lum/alpha/colour are sampled bilinearly from the source (edge
+   * clamp) and authored chars nearest. Weights are computed once per cell for
+   * all channels; nothing here calls a function with double arguments
+   * (DECISIONS 013) except the displace fns, which receive integers.
+   */
+  private runDisplace(): void {
+    const { work, source, displaceFns, ctx, at } = this;
+    const { cols, rows } = work;
+    const sLum = source.lum;
+    const sAlpha = source.alpha;
+    const sColor = source.color;
+    const sChar = source.char;
+    const wColor = work.color;
+    const maxX = cols - 1;
+    const maxY = rows - 1;
+    const nFns = displaceFns.length;
+
+    work.charOverride.fill(0);
+
+    // Hot loop: sample indices are clamped into the grid, fn index < nFns.
+    let i = 0;
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++, i++) {
+        at.x = x;
+        at.y = y;
+        for (let f = 0; f < nFns; f++) displaceFns[f]!(x, y, ctx, at);
+
+        // Math.min/max keep these float64 throughout; a ternary mixing the Smi
+        // 0 with a double makes Maglev box the result (DECISIONS 013).
+        const sx = Math.min(Math.max(at.x, 0), maxX);
+        const sy = Math.min(Math.max(at.y, 0), maxY);
+        const x0 = Math.floor(sx);
+        const y0 = Math.floor(sy);
+        const x1 = x0 < maxX ? x0 + 1 : x0;
+        const y1 = y0 < maxY ? y0 + 1 : y0;
+        const fx = sx - x0;
+        const fy = sy - y0;
+        const w00 = (1 - fx) * (1 - fy);
+        const w10 = fx * (1 - fy);
+        const w01 = (1 - fx) * fy;
+        const w11 = fx * fy;
+        const i00 = y0 * cols + x0;
+        const i10 = y0 * cols + x1;
+        const i01 = y1 * cols + x0;
+        const i11 = y1 * cols + x1;
+
+        work.lum[i] = sLum[i00]! * w00 + sLum[i10]! * w10 + sLum[i01]! * w01 + sLum[i11]! * w11;
+        work.alpha[i] =
+          sAlpha[i00]! * w00 + sAlpha[i10]! * w10 + sAlpha[i01]! * w01 + sAlpha[i11]! * w11;
+
+        if (wColor !== null && sColor !== null) {
+          for (let k = 0; k < 3; k++) {
+            wColor[i * 3 + k] =
+              sColor[i00 * 3 + k]! * w00 +
+              sColor[i10 * 3 + k]! * w10 +
+              sColor[i01 * 3 + k]! * w01 +
+              sColor[i11 * 3 + k]! * w11;
+          }
+        }
+
+        // Authored glyphs cannot be blended: take the nearest one.
+        work.char[i] = sChar === null ? 0 : sChar[(fy < 0.5 ? y0 : y1) * cols + (fx < 0.5 ? x0 : x1)]!;
+      }
+    }
   }
 
   /** One reusable CellRef per frame (SPEC 6.2); `char` maps to charOverride. */

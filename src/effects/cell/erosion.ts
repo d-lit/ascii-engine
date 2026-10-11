@@ -28,7 +28,13 @@ export const erosion = defineEffect({
       kind: 'cell',
       apply(cell, x, y, ctx) {
         const inv = 1 / p.scale;
-        const n = 0.5 + 0.5 * noise.fbm3(x * inv, (y / ctx.cellAspect) * inv, ctx.time * p.speed, p.octaves);
+        // io form: no doubles cross a call that V8 may not inline (DECISIONS 013).
+        const io = noise.io;
+        io[0] = x * inv;
+        io[1] = (y / ctx.cellAspect) * inv;
+        io[2] = ctx.time * p.speed;
+        noise.fbm3io(p.octaves | 0);
+        const n = 0.5 + 0.5 * io[3]!;
         const keep = smoothstep(p.threshold - p.softness, p.threshold, n);
         if (p.mode === 'hide') cell.alpha *= keep;
         else cell.lum *= keep;

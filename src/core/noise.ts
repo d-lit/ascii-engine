@@ -19,6 +19,12 @@ export interface Noise {
   /** Fractal sum normalized back to roughly -1..1. */
   fbm2(x: number, y: number, octaves: number, lacunarity?: number, gain?: number): number;
   fbm3(x: number, y: number, z: number, octaves: number, lacunarity?: number, gain?: number): number;
+  /**
+   * Allocation-safe form for hot loops (DECISIONS 013): write x, y, z into
+   * io[0..2], call, read io[3]. Lacunarity 2, gain 0.5.
+   */
+  readonly io: Float64Array;
+  fbm3io(octaves: number): void;
 }
 
 /**
@@ -213,5 +219,26 @@ export function createNoise(seed: number): Noise {
     return norm > 0 ? sum / norm : 0;
   }
 
-  return { noise2, noise3, fbm2, fbm3 };
+  function fbm3io(octaves: number): void {
+    const x = io[0]!;
+    const y = io[1]!;
+    const z = io[2]!;
+    let sum = 0;
+    let norm = 0;
+    let amp = 1;
+    let freq = 1;
+    for (let o = 0; o < octaves; o++) {
+      io[0] = x * freq;
+      io[1] = y * freq;
+      io[2] = z * freq;
+      kernel3();
+      sum += amp * io[3]!;
+      norm += amp;
+      amp *= 0.5;
+      freq *= 2;
+    }
+    io[3] = norm > 0 ? sum / norm : 0;
+  }
+
+  return { noise2, noise3, fbm2, fbm3, io, fbm3io };
 }

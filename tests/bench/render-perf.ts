@@ -7,6 +7,8 @@ import { decode } from '../../src/effects/cell/decode.ts';
 import { erosion } from '../../src/effects/cell/erosion.ts';
 import { pulse } from '../../src/effects/cell/pulse.ts';
 import { wave } from '../../src/effects/cell/wave.ts';
+import { liquid } from '../../src/effects/displace/liquid.ts';
+import { ripple } from '../../src/effects/displace/ripple.ts';
 import type { AnyEffectDef } from '../../src/effects/types.ts';
 import { createPointer, Pipeline } from '../../src/pipeline/pipeline.ts';
 import { Compositor, type MaskSource } from '../../src/render/compositor.ts';
@@ -77,6 +79,7 @@ const cases: Array<[string, AnyEffectDef[]]> = [
   ['wave', [wave]],
   ['erosion', [erosion]],
   ['all four', [wave, pulse, erosion, decode]],
+  ['ripple+liquid', [ripple, liquid]],
 ];
 
 const only = process.env.ONLY;
