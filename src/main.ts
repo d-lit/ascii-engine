@@ -1,5 +1,5 @@
 import './style.css';
-import type { Field, FieldMeta, Polarity } from './core/field.ts';
+import type { Field, FieldMeta, Polarity, WorkBuffer } from './core/field.ts';
 import { createLoop } from './core/loop.ts';
 import { PointerInput } from './core/pointer.ts';
 import { computeRows, importImage } from './core/import-image.ts';
@@ -18,6 +18,7 @@ import type { AnyEffectDef } from './effects/types.ts';
 import type { ParamInput } from './pipeline/params.ts';
 import { Pipeline, type ChainEntry } from './pipeline/pipeline.ts';
 import { Canvas2DRenderer } from './render/canvas2d.ts';
+import { exportText } from './render/export-text.ts';
 import { buildParamControls } from './ui/controls.ts';
 import { DebugOverlay } from './ui/debug-overlay.ts';
 
@@ -36,6 +37,7 @@ interface Settings {
   polarity: Polarity;
   quantizeMode: QuantizeMode;
   useSourceChars: boolean;
+  trimRight: boolean;
 }
 
 const settings: Settings = {
@@ -44,6 +46,7 @@ const settings: Settings = {
   polarity: 'light-on-dark',
   quantizeMode: 'nearest-density',
   useSourceChars: true,
+  trimRight: true,
 };
 
 function el<T extends HTMLElement>(selector: string): T {
@@ -80,6 +83,8 @@ let field: Field | null = null;
 let ramp: Ramp | null = null;
 let meta: FieldMeta = { cellAspect: CELL_ASPECT, polarity: settings.polarity };
 let pipeline: Pipeline | null = null;
+// Last rendered frame, for export.
+let lastWork: WorkBuffer | null = null;
 
 const input = new PointerInput(canvas, () => ({ cols: field?.cols ?? 1, rows: field?.rows ?? 1 }));
 const overlay = new DebugOverlay(stage, ['params', 'copy', 'cell', 'render', 'total']);
@@ -147,6 +152,7 @@ function frame(dt: number): void {
   if (pipeline === null || ramp === null) return;
   input.tick(dt);
   const work = pipeline.frame(dt);
+  lastWork = work;
 
   const t0 = performance.now();
   renderer.render(work, ramp, meta);
@@ -203,6 +209,8 @@ async function load(file: File): Promise<void> {
   textField = null;
   stage.classList.add('has-source');
   overlay.visible = debugToggle.checked;
+  copyButton.disabled = false;
+  saveButton.disabled = false;
   colsRow.hidden = source.kind !== 'image';
   sourceCharsRow.hidden = source.kind !== 'text';
   safeRebuild();
@@ -348,6 +356,69 @@ restartButton.type = 'button';
 restartButton.textContent = 'restart';
 restartButton.addEventListener('click', () => pipeline?.restart());
 row('time', restartButton);
+
+// ---- export ----
+
+function currentText(): string | null {
+  if (source === null || lastWork === null || ramp === null) return null;
+  return exportText(lastWork, ramp, settings.polarity, {
+    useSourceChars: settings.useSourceChars,
+    quantizeMode: settings.quantizeMode,
+    trimRight: settings.trimRight,
+  });
+}
+
+function baseName(name: string): string {
+  const dot = name.lastIndexOf('.');
+  return dot > 0 ? name.slice(0, dot) : name;
+}
+
+const trimToggle = document.createElement('input');
+trimToggle.type = 'checkbox';
+trimToggle.checked = settings.trimRight;
+trimToggle.addEventListener('change', () => {
+  settings.trimRight = trimToggle.checked;
+});
+row('trim', trimToggle);
+
+const copyButton = document.createElement('button');
+copyButton.type = 'button';
+copyButton.textContent = 'copy';
+copyButton.disabled = true;
+copyButton.addEventListener('click', () => {
+  const text = currentText();
+  if (text === null) return;
+  navigator.clipboard.writeText(text).then(
+    () => setStatus(`copied ${text.split('\n').length - 1} lines`),
+    (err: unknown) => {
+      console.error(err);
+      setStatus(`copy failed: ${err instanceof Error ? err.message : String(err)}`);
+    },
+  );
+});
+
+const saveButton = document.createElement('button');
+saveButton.type = 'button';
+saveButton.textContent = 'save .txt';
+saveButton.disabled = true;
+saveButton.addEventListener('click', () => {
+  const text = currentText();
+  if (text === null || source === null) return;
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${baseName(source.name)}.txt`;
+  link.click();
+  URL.revokeObjectURL(url);
+});
+
+// A div, not a label: clicking the caption must not press a button.
+const exportRow = document.createElement('div');
+exportRow.className = 'row';
+const exportCaption = document.createElement('span');
+exportCaption.textContent = 'export';
+exportRow.append(exportCaption, copyButton, saveButton);
+panel.append(exportRow);
 
 const status = document.createElement('p');
 status.className = 'status';
