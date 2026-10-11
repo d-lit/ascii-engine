@@ -4,12 +4,12 @@
 
 ## Фаза 0 — Каркас
 
-- [ ] Очистить демо-код шаблона Vite (`counter.ts`, стили, лого).
-- [ ] `tsconfig`: `strict`, `noUncheckedIndexedAccess`, `noImplicitOverride`, `exactOptionalPropertyTypes`.
-- [ ] Скрипты: `check` (`tsc --noEmit && vitest run`), `test` (`vitest`).
-- [ ] Конфиг vitest (environment `node`; тесты, которым нужен canvas, пока не пишем — логику держим в чистых функциях).
-- [ ] Структура папок из `CLAUDE.md`, модули с экспортом типов из SPEC.
-- [ ] `index.html`: полноэкранный контейнер с canvas, место под панель.
+- [x] Очистить демо-код шаблона Vite (`counter.ts`, стили, лого).
+- [x] `tsconfig`: `strict`, `noUncheckedIndexedAccess`, `noImplicitOverride`, `exactOptionalPropertyTypes`.
+- [x] Скрипты: `check` (`tsc --noEmit && vitest run`), `test` (`vitest`).
+- [x] Конфиг vitest (environment `node`; тесты, которым нужен canvas, пока не пишем — логику держим в чистых функциях).
+- [x] Структура папок из `CLAUDE.md`, модули с экспортом типов из SPEC.
+- [x] `index.html`: полноэкранный контейнер с canvas, место под панель.
 
 **Готово, когда:** `npm run check` и `npm run build` проходят; страница открывается без ошибок в консоли.
 

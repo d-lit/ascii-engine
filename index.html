@@ -4,10 +4,16 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ascii-engine</title>
+    <title>ASCII Engine</title>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <main id="stage">
+        <canvas id="view"></canvas>
+        <div id="drop-hint">Drop an image or .txt file</div>
+      </main>
+      <aside id="panel"></aside>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
