@@ -1,11 +1,15 @@
 import { createField, type Field, type FieldMeta } from './field.ts';
 import { sobel } from './import-image.ts';
-import { densityOfChar, densityToLum, type Ramp } from './ramp.ts';
+import {
+  densityOfChar,
+  densityToLum,
+  normalizeDensity,
+  type DensityMeasurer,
+  type Ramp,
+} from './ramp.ts';
 
 export interface TextImportOptions {
   tabWidth?: number;
-  /** Measures density of glyphs outside the ramp; omitted in non-DOM contexts. */
-  measureChar?: (char: string) => number;
 }
 
 export interface TextImportResult {
@@ -14,52 +18,75 @@ export interface TextImportResult {
 }
 
 const DEFAULT_TAB_WIDTH = 4;
+const SPACE = ' ';
 
-/** Normalizes line endings and tabs, then pads every row to the widest one. */
-export function normalizeText(text: string, tabWidth = DEFAULT_TAB_WIDTH): string[] {
-  const lines = text.replace(/\r\n?/g, '\n').split('\n');
-  const expanded = lines.map((line) => line.replace(/\t/g, ' '.repeat(tabWidth)));
+const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 
-  let width = 0;
-  for (const line of expanded) {
-    const len = Array.from(line).length;
-    if (len > width) width = len;
-  }
-
-  return expanded.map((line) => {
-    const len = Array.from(line).length;
-    return len < width ? line + ' '.repeat(width - len) : line;
-  });
+function graphemes(line: string): string[] {
+  const out: string[] = [];
+  for (const { segment } of segmenter.segment(line)) out.push(segment);
+  return out;
 }
 
-function isUnsupported(char: string): boolean {
-  if (char.length !== 1) return true; // surrogate pair: not representable in Uint16Array
-  const code = char.charCodeAt(0);
-  if (code >= 0x0300 && code <= 0x036f) return true; // combining marks
-  if (code >= 0x1100 && code <= 0x115f) return true; // hangul jamo
-  if (code >= 0x2e80 && code <= 0xa4cf) return true; // CJK
-  if (code >= 0xac00 && code <= 0xd7a3) return true; // hangul syllables
-  if (code >= 0xf900 && code <= 0xfaff) return true; // CJK compatibility
-  if (code >= 0xfe30 && code <= 0xfe6f) return true; // CJK forms
-  if (code >= 0xff00 && code <= 0xff60) return true; // fullwidth forms
+/**
+ * Normalizes line endings and tabs, splits rows into grapheme clusters and pads
+ * every row to the widest one. One cluster = one cell.
+ */
+export function normalizeText(text: string, tabWidth = DEFAULT_TAB_WIDTH): string[][] {
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
+  const rows = lines.map((line) => graphemes(line.replace(/\t/g, SPACE.repeat(tabWidth))));
+
+  let width = 0;
+  for (const row of rows) if (row.length > width) width = row.length;
+  for (const row of rows) while (row.length < width) row.push(SPACE);
+
+  return rows;
+}
+
+// Inclusive code ranges that cannot occupy one grid cell (DECISIONS 009):
+// wide/fullwidth glyphs, plus combining and zero-width marks left without a base.
+const UNSUPPORTED_RANGES: ReadonlyArray<readonly [number, number]> = [
+  [0x0300, 0x036f], // combining diacritics
+  [0x1100, 0x115f], // hangul jamo
+  [0x1ab0, 0x1aff], // combining diacritics extended
+  [0x1dc0, 0x1dff], // combining diacritics supplement
+  [0x200b, 0x200f], // zero-width and direction marks
+  [0x20d0, 0x20ff], // combining marks for symbols
+  [0x2e80, 0xa4cf], // CJK and related
+  [0xac00, 0xd7a3], // hangul syllables
+  [0xf900, 0xfaff], // CJK compatibility
+  [0xfe00, 0xfe0f], // variation selectors
+  [0xfe20, 0xfe2f], // combining half marks
+  [0xfe30, 0xfe6f], // CJK forms
+  [0xff00, 0xff60], // fullwidth forms
+  [0xffe0, 0xffe6], // fullwidth signs
+];
+
+/** A cluster longer than one code unit never fits Uint16Array `char`. */
+export function isUnsupported(cluster: string): boolean {
+  if (cluster.length !== 1) return true;
+  const code = cluster.charCodeAt(0);
+  for (const [lo, hi] of UNSUPPORTED_RANGES) if (code >= lo && code <= hi) return true;
   return false;
 }
 
 /**
  * Text is the one import where polarity matters: the same glyph reads bright on
- * a dark theme and dark on a light one (DECISIONS 004).
+ * a dark theme and dark on a light one (DECISIONS 004). Glyphs outside the ramp
+ * are measured and placed on the ramp's scale (DECISIONS 008, 011).
  */
 export function importText(
   text: string,
   ramp: Ramp,
   meta: FieldMeta,
+  measure: DensityMeasurer,
   opts: TextImportOptions = {},
 ): TextImportResult {
   const lines = normalizeText(text, opts.tabWidth ?? DEFAULT_TAB_WIDTH);
   const warnings: string[] = [];
 
   const rows = Math.max(1, lines.length);
-  const cols = Math.max(1, Array.from(lines[0] ?? '').length);
+  const cols = Math.max(1, lines[0]?.length ?? 0);
   const field = createField(cols, rows, { char: true, grad: true });
   const char = field.char;
   const { gradX, gradY } = field;
@@ -68,53 +95,45 @@ export function importText(
   }
 
   const unsupported = new Set<string>();
-  const unmeasured = new Set<string>();
-  const measured = new Map<string, number>();
+  const outside = new Map<string, number>();
   const bgLum = densityToLum(0, meta.polarity);
 
   for (let y = 0; y < rows; y++) {
-    const glyphs = Array.from(lines[y] ?? '');
+    const glyphs = lines[y] ?? [];
     for (let x = 0; x < cols; x++) {
       const i = y * cols + x;
-      let glyph = glyphs[x] ?? ' ';
+      let glyph = glyphs[x] ?? SPACE;
 
       if (isUnsupported(glyph)) {
         unsupported.add(glyph);
-        glyph = ' ';
+        glyph = SPACE;
       }
 
-      if (glyph === ' ') {
+      char[i] = glyph.charCodeAt(0);
+
+      if (glyph === SPACE) {
         field.lum[i] = bgLum;
         field.alpha[i] = 0;
-        char[i] = glyph.charCodeAt(0);
         continue;
       }
 
       let density = densityOfChar(ramp, glyph);
       if (density === undefined) {
-        const hit = measured.get(glyph);
-        if (hit !== undefined) {
-          density = hit;
-        } else if (opts.measureChar) {
-          density = opts.measureChar(glyph);
-          measured.set(glyph, density);
-        } else {
-          unmeasured.add(glyph);
-          density = 1;
+        density = outside.get(glyph);
+        if (density === undefined) {
+          density = normalizeDensity(ramp, measure(glyph));
+          outside.set(glyph, density);
         }
       }
 
       field.lum[i] = densityToLum(density, meta.polarity);
       field.alpha[i] = 1;
-      char[i] = glyph.charCodeAt(0);
     }
   }
 
   if (unsupported.size > 0) {
-    warnings.push(`replaced with space (wide or combining): ${[...unsupported].join(' ')}`);
-  }
-  if (unmeasured.size > 0) {
-    warnings.push(`not in ramp and unmeasured, treated as solid: ${[...unmeasured].join(' ')}`);
+    const list = [...unsupported].map((g) => JSON.stringify(g)).join(' ');
+    warnings.push(`replaced with space (wide, combining or multi-unit): ${list}`);
   }
 
   sobel(field.lum, cols, rows, gradX, gradY);

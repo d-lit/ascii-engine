@@ -7,43 +7,101 @@ export const BLOCK_LOWER = 0x2584; // U+2584 lower half
 export const BLOCK_LEFT = 0x258c; // U+258C left half
 export const BLOCK_RIGHT = 0x2590; // U+2590 right half
 
-const SPACE = 0x20;
-
-/**
- * Analytic coverage, not measured: a font may render these with padding or
- * antialiased edges, which would make the ramp uneven (SPEC 9.3).
- */
-export const BLOCK_DENSITY: ReadonlyMap<number, number> = new Map([
-  [SPACE, 0],
+const SHADE_DENSITY: ReadonlyMap<number, number> = new Map([
   [BLOCK_LIGHT, 0.25],
   [BLOCK_MEDIUM, 0.5],
   [BLOCK_DARK, 0.75],
-  [BLOCK_FULL, 1],
-  [BLOCK_UPPER, 0.5],
-  [BLOCK_LOWER, 0.5],
-  [BLOCK_LEFT, 0.5],
-  [BLOCK_RIGHT, 0.5],
 ]);
 
-const SHADE_LEVEL: ReadonlyMap<number, number> = new Map([
-  [BLOCK_LIGHT, 4],
-  [BLOCK_MEDIUM, 8],
-  [BLOCK_DARK, 12],
+const SHAPES: ReadonlySet<number> = new Set([
+  BLOCK_FULL,
+  BLOCK_UPPER,
+  BLOCK_LOWER,
+  BLOCK_LEFT,
+  BLOCK_RIGHT,
 ]);
 
-// Ordered 4x4 dither; a pixel lights up when its threshold is below the level.
+// Ordered 4x4 dither matrix, values 0..15.
 const BAYER_4X4: readonly number[] = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
 
+function bayer(x: number, y: number): number {
+  return BAYER_4X4[(y & 3) * 4 + (x & 3)]!;
+}
+
 export function isBlockGlyph(code: number): boolean {
-  return code !== SPACE && BLOCK_DENSITY.has(code);
+  return SHADE_DENSITY.has(code) || SHAPES.has(code);
+}
+
+function shadeCount(d: number, w: number, h: number): number {
+  return Math.round(d * w * h);
+}
+
+/**
+ * Exact coverage of the glyph as drawn on a `w x h` tile, or undefined for
+ * non-block glyphs. Matches drawBlockGlyph by construction (DECISIONS 010).
+ */
+export function blockGlyphDensity(code: number, w: number, h: number): number | undefined {
+  const area = w * h;
+  if (area <= 0) return undefined;
+
+  const shade = SHADE_DENSITY.get(code);
+  if (shade !== undefined) return shadeCount(shade, w, h) / area;
+
+  switch (code) {
+    case BLOCK_FULL:
+      return 1;
+    case BLOCK_UPPER:
+      return Math.round(h / 2) / h;
+    case BLOCK_LOWER:
+      return (h - Math.round(h / 2)) / h;
+    case BLOCK_LEFT:
+      return Math.round(w / 2) / w;
+    case BLOCK_RIGHT:
+      return (w - Math.round(w / 2)) / w;
+    default:
+      return undefined;
+  }
+}
+
+const orderCache = new Map<string, Uint32Array>();
+
+/**
+ * Tile pixel indices in dither order: by Bayer value, ties broken by Bayer of
+ * the 4x4 block position, so extra pixels on a large tile spread evenly too.
+ */
+function ditherOrder(w: number, h: number): Uint32Array {
+  const key = `${w}x${h}`;
+  const hit = orderCache.get(key);
+  if (hit) return hit;
+
+  const keys = new Float64Array(w * h);
+  const order: number[] = [];
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      keys[i] = bayer(x, y) * 16 + bayer(x >> 2, y >> 2) + (i / (w * h)) * 1e-3;
+      order.push(i);
+    }
+  }
+  order.sort((a, b) => keys[a]! - keys[b]!);
+
+  const out = Uint32Array.from(order);
+  orderCache.set(key, out);
+  return out;
+}
+
+export interface RectSink {
+  fillStyle: string | CanvasGradient | CanvasPattern;
+  fillRect(x: number, y: number, w: number, h: number): void;
 }
 
 /**
  * Draws a block glyph with rectangles instead of text. All coordinates are
  * physical pixels and stay integral, so neighbouring tiles leave no seams.
+ * Shades light exactly round(d * w * h) pixels (DECISIONS 010).
  */
 export function drawBlockGlyph(
-  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  ctx: RectSink,
   code: number,
   x: number,
   y: number,
@@ -53,13 +111,13 @@ export function drawBlockGlyph(
 ): void {
   ctx.fillStyle = color;
 
-  const shade = SHADE_LEVEL.get(code);
+  const shade = SHADE_DENSITY.get(code);
   if (shade !== undefined) {
-    for (let py = 0; py < h; py++) {
-      for (let px = 0; px < w; px++) {
-        const threshold = BAYER_4X4[(py & 3) * 4 + (px & 3)]!;
-        if (threshold < shade) ctx.fillRect(x + px, y + py, 1, 1);
-      }
+    const order = ditherOrder(w, h);
+    const n = shadeCount(shade, w, h);
+    for (let k = 0; k < n; k++) {
+      const i = order[k]!;
+      ctx.fillRect(x + (i % w), y + Math.floor(i / w), 1, 1);
     }
     return;
   }

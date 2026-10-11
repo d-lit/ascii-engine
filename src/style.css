@@ -72,3 +72,41 @@ body {
   border-left: 1px solid var(--border);
   background: var(--panel-bg);
 }
+
+#stage[data-polarity='dark-on-light'] {
+  background: #f4f1ea;
+}
+
+#panel .row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+#panel .row[hidden] {
+  display: none;
+}
+
+#panel .row > span {
+  flex: 0 0 88px;
+  color: var(--muted);
+}
+
+#panel .row > input[type='range'],
+#panel .row > select,
+#panel .row > input[type='file'] {
+  flex: 1;
+  min-width: 0;
+}
+
+#panel output {
+  flex: 0 0 32px;
+  text-align: right;
+}
+
+#panel .status {
+  margin-top: 16px;
+  color: var(--muted);
+  word-break: break-all;
+}

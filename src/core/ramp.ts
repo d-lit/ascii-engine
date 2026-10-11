@@ -1,16 +1,25 @@
-import { BLOCK_DENSITY } from '../render/block-glyphs.ts';
+import { blockGlyphDensity } from '../render/block-glyphs.ts';
+import { setupGlyphFont } from '../render/glyph-font.ts';
 import type { Polarity } from './field.ts';
 
 export interface Ramp {
   chars: string;
+  /** Normalized 0..1 within this ramp (DECISIONS 006). */
   density: Float32Array;
+  /** Raw densities that map to 0 and 1; places outside glyphs on this scale (DECISIONS 011). */
+  rawMin: number;
+  rawMax: number;
 }
+
+/** Raw ink coverage of a glyph, 0..1. Analytic for block glyphs. */
+export type DensityMeasurer = (char: string) => number;
 
 export type QuantizeMode = 'nearest-density' | 'uniform';
 
 export interface FontSpec {
   family: string;
   weight: number;
+  /** Physical pixels (already scaled by devicePixelRatio). */
   cellW: number;
   cellH: number;
 }
@@ -59,56 +68,80 @@ export function makeRamp(chars: string, density: ArrayLike<number>): Ramp {
     for (let i = 0; i < pairs.length; i++) out[i] = (pairs[i]!.d - min) / span;
   }
 
-  return { chars: pairs.map((p) => p.char).join(''), density: out };
+  return { chars: pairs.map((p) => p.char).join(''), density: out, rawMin: min, rawMax: max };
 }
 
+/** Maps a raw density onto the ramp's normalized scale, clamped to 0..1. */
+export function normalizeDensity(ramp: Ramp, raw: number): number {
+  const span = ramp.rawMax - ramp.rawMin;
+  if (span <= 0) return 0;
+  const d = (raw - ramp.rawMin) / span;
+  return d < 0 ? 0 : d > 1 ? 1 : d;
+}
+
+function fontKey(font: FontSpec): string {
+  return `${font.family}|${font.weight}|${font.cellW}x${font.cellH}`;
+}
+
+const measurerCache = new Map<string, DensityMeasurer>();
 const rampCache = new Map<string, Ramp>();
 
-function fontKey(chars: string, font: FontSpec): string {
-  return `${chars}|${font.family}|${font.weight}|${font.cellW}x${font.cellH}`;
-}
-
 /**
- * Measures ink coverage per glyph on a canvas, then delegates to makeRamp.
- * Needs DOM; block glyphs use analytic densities instead of measurement.
+ * Canvas measurer for one font, cached per font and per glyph. Shared by
+ * measureRamp and text import (DECISIONS 008). Needs DOM.
+ * `cellW`/`cellH` are physical pixels, the same tile the atlas draws.
  */
-export function measureRamp(chars: string, font: FontSpec): Ramp {
-  const key = fontKey(chars, font);
-  const cached = rampCache.get(key);
+export function createDensityMeasurer(font: FontSpec): DensityMeasurer {
+  const key = fontKey(font);
+  const cached = measurerCache.get(key);
   if (cached) return cached;
 
-  const points = Array.from(chars);
   const w = Math.max(1, Math.round(font.cellW));
   const h = Math.max(1, Math.round(font.cellH));
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  if (!ctx) throw new Error('measureRamp: no 2d context');
-
-  ctx.font = `${font.weight} ${h}px ${font.family}`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
+  if (!ctx) throw new Error('createDensityMeasurer: no 2d context');
+  setupGlyphFont(ctx, { ...font, cellW: w, cellH: h });
   ctx.fillStyle = '#fff';
 
-  const measured = new Float32Array(points.length);
   const total = w * h * 255;
-  for (let i = 0; i < points.length; i++) {
-    const char = points[i]!;
-    const analytic = char.length === 1 ? BLOCK_DENSITY.get(char.charCodeAt(0)) : undefined;
-    if (analytic !== undefined) {
-      measured[i] = analytic;
-      continue;
-    }
-    ctx.clearRect(0, 0, w, h);
-    ctx.fillText(char, w / 2, h / 2);
-    const data = ctx.getImageData(0, 0, w, h).data;
-    let sum = 0;
-    for (let p = 3; p < data.length; p += 4) sum += data[p]!;
-    measured[i] = sum / total;
-  }
+  const glyphs = new Map<string, number>();
 
-  const ramp = makeRamp(chars, measured);
+  const measure: DensityMeasurer = (char) => {
+    const hit = glyphs.get(char);
+    if (hit !== undefined) return hit;
+
+    // Block glyphs are drawn procedurally; their exact coverage is known.
+    const analytic = char.length === 1 ? blockGlyphDensity(char.charCodeAt(0), w, h) : undefined;
+    let d: number;
+    if (analytic !== undefined) {
+      d = analytic;
+    } else {
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillText(char, w / 2, h / 2);
+      const data = ctx.getImageData(0, 0, w, h).data;
+      let sum = 0;
+      for (let p = 3; p < data.length; p += 4) sum += data[p]!;
+      d = sum / total;
+    }
+    glyphs.set(char, d);
+    return d;
+  };
+
+  measurerCache.set(key, measure);
+  return measure;
+}
+
+/** Measures every glyph with the font's measurer, then delegates to makeRamp. */
+export function measureRamp(chars: string, font: FontSpec): Ramp {
+  const key = `${chars}|${fontKey(font)}`;
+  const cached = rampCache.get(key);
+  if (cached) return cached;
+
+  const measure = createDensityMeasurer(font);
+  const ramp = makeRamp(chars, Array.from(chars, measure));
   rampCache.set(key, ramp);
   return ramp;
 }
