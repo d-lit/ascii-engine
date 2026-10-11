@@ -12,9 +12,9 @@ export const wave = defineEffect({
   kind: 'cell',
   params: {
     direction: { type: 'number', min: 0, max: 360, step: 1, default: 0, label: 'direction, deg' },
-    wavelength: { type: 'number', min: 2, max: 200, step: 1, default: 24, label: 'wavelength, cells' },
-    speed: { type: 'number', min: -5, max: 5, step: 0.05, default: 0.5, label: 'speed, waves/s' },
-    amplitude: { type: 'number', min: 0, max: 1, step: 0.01, default: 0.3 },
+    wavelength: { type: 'number', min: 2, max: 200, step: 1, default: 24, label: 'wavelength, cells', random: [8, 60] },
+    speed: { type: 'number', min: -5, max: 5, step: 0.05, default: 0.5, label: 'speed, waves/s', random: [-1, 1] },
+    amplitude: { type: 'number', min: 0, max: 1, step: 0.01, default: 0.3, random: [0.05, 0.35] },
   },
   create(p) {
     // Direction changes rarely; recompute the unit vector only when it does.

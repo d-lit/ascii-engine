@@ -210,7 +210,7 @@ export type MaskSpec =
 
 ```ts
 export type ParamSpec =
-  | { type: 'number'; min: number; max: number; step?: number; default: number; label?: string }
+  | { type: 'number'; min: number; max: number; step?: number; default: number; label?: string; random?: [number, number] }
   | { type: 'boolean'; default: boolean; label?: string }
   | { type: 'select'; options: readonly string[]; default: string; label?: string }
   | { type: 'color'; default: string; label?: string }
@@ -231,6 +231,7 @@ export type ParamValue =
 - Значения за пределами `min/max` схемы клампятся при разрешении.
 - Точка разрешается в ячейки: `'center'` → центр сетки `((cols-1)/2, (rows-1)/2)`, нормированная `{x, y}` → `(x·(cols-1), y·(rows-1))`, то есть 0 и 1 — центры крайних ячеек; `'pointer'` — координаты курсора. Разрешение каждый кадр мутирует один и тот же `Vec2`, без аллокаций.
 - Неверный тип значения → default (полная валидация с предупреждениями — в пресетах, фаза 4).
+- `random?: [min, max]` у числового параметра — диапазон для генератора случайных цепочек (`presets/random.ts`); на разрешение значений не влияет. Без подсказки генератор берёт полосу ±15% размаха вокруг default.
 - `ResolvedParams<P>` — отображение схемы в обычные TS-типы (`number`, `boolean`, `string`, `{ x, y }` в ячейках), выводится из `P` на уровне типов.
 
 ## 8. Пресеты

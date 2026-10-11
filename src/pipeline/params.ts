@@ -10,6 +10,8 @@ export interface NumberSpec {
   step?: number;
   default: number;
   label?: string;
+  /** Range the preset randomizer draws from; omitted = around the default. */
+  random?: readonly [min: number, max: number];
 }
 
 export type ParamSpec =

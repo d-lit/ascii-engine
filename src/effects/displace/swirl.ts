@@ -14,9 +14,9 @@ export const swirl = defineEffect({
   kind: 'displace',
   params: {
     center: { type: 'point', default: 'center' },
-    angle: { type: 'number', min: -720, max: 720, step: 5, default: 180, label: 'angle, deg' },
-    radius: { type: 'number', min: 1, max: 200, step: 1, default: 30, label: 'radius, cells' },
-    wobble: { type: 'number', min: 0, max: 3, step: 0.05, default: 0.25, label: 'wobble, Hz' },
+    angle: { type: 'number', min: -720, max: 720, step: 5, default: 180, label: 'angle, deg', random: [-360, 360] },
+    radius: { type: 'number', min: 1, max: 200, step: 1, default: 30, label: 'radius, cells', random: [15, 60] },
+    wobble: { type: 'number', min: 0, max: 3, step: 0.05, default: 0.25, label: 'wobble, Hz', random: [0, 0.5] },
   },
   create(p) {
     return {

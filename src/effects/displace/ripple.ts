@@ -16,10 +16,10 @@ export const ripple = defineEffect({
   params: {
     mode: { type: 'select', options: ['continuous', 'click'], default: 'continuous' },
     center: { type: 'point', default: 'pointer', label: 'center (continuous)' },
-    amplitude: { type: 'number', min: 0, max: 6, step: 0.1, default: 1.5, label: 'amplitude, cells' },
-    wavelength: { type: 'number', min: 2, max: 80, step: 1, default: 12, label: 'wavelength, cells' },
-    speed: { type: 'number', min: 0, max: 120, step: 1, default: 24, label: 'speed, cells/s' },
-    decay: { type: 'number', min: 0, max: 200, step: 1, default: 40, label: 'fade radius, cells' },
+    amplitude: { type: 'number', min: 0, max: 6, step: 0.1, default: 1.5, label: 'amplitude, cells', random: [0.5, 3] },
+    wavelength: { type: 'number', min: 2, max: 80, step: 1, default: 12, label: 'wavelength, cells', random: [6, 30] },
+    speed: { type: 'number', min: 0, max: 120, step: 1, default: 24, label: 'speed, cells/s', random: [8, 40] },
+    decay: { type: 'number', min: 0, max: 200, step: 1, default: 40, label: 'fade radius, cells', random: [15, 80] },
     life: { type: 'number', min: 0.5, max: 10, step: 0.1, default: 3, label: 'ring life, s' },
   },
   create(p) {

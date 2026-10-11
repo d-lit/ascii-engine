@@ -37,6 +37,11 @@ function run(p: Pipeline, frames: number): number[] {
 }
 
 describe('built-in presets', () => {
+  it('are picked up from the folder in file-name order', () => {
+    const names = BUILTIN_PRESETS.map((p) => (p as { name: string }).name);
+    expect(names.slice(0, 4)).toEqual(['Liquid portrait', 'Dissolve loop', 'Pointer lens', 'Broadcast glitch']);
+  });
+
   it.each(BUILTIN_PRESETS.map((p) => [(p as { name: string }).name, p]))(
     '%s validates without warnings',
     (_name, raw) => {

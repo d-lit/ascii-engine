@@ -15,10 +15,10 @@ export const pulse = defineEffect({
     shape: { type: 'select', options: ['global', 'radial'], default: 'radial' },
     target: { type: 'select', options: ['brightness', 'contrast'], default: 'brightness' },
     center: { type: 'point', default: 'pointer' },
-    frequency: { type: 'number', min: 0.05, max: 5, step: 0.05, default: 1, label: 'frequency, Hz' },
-    amount: { type: 'number', min: 0, max: 1, step: 0.01, default: 0.35 },
-    wavelength: { type: 'number', min: 2, max: 200, step: 1, default: 30, label: 'ring spacing, cells' },
-    radius: { type: 'number', min: 0, max: 200, step: 1, default: 25, label: 'fade radius, cells' },
+    frequency: { type: 'number', min: 0.05, max: 5, step: 0.05, default: 1, label: 'frequency, Hz', random: [0.2, 2] },
+    amount: { type: 'number', min: 0, max: 1, step: 0.01, default: 0.35, random: [0.1, 0.45] },
+    wavelength: { type: 'number', min: 2, max: 200, step: 1, default: 30, label: 'ring spacing, cells', random: [10, 60] },
+    radius: { type: 'number', min: 0, max: 200, step: 1, default: 25, label: 'fade radius, cells', random: [10, 60] },
   },
   create(p) {
     return {

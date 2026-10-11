@@ -14,10 +14,10 @@ export const glitchRows = defineEffect({
   name: 'Glitch rows',
   kind: 'displace',
   params: {
-    rate: { type: 'number', min: 0.5, max: 30, step: 0.5, default: 6, label: 'rate, 1/s' },
-    amount: { type: 'number', min: 0, max: 1, step: 0.01, default: 0.15 },
+    rate: { type: 'number', min: 0.5, max: 30, step: 0.5, default: 6, label: 'rate, 1/s', random: [2, 12] },
+    amount: { type: 'number', min: 0, max: 1, step: 0.01, default: 0.15, random: [0.05, 0.3] },
     band: { type: 'number', min: 1, max: 20, step: 1, default: 3, label: 'band, rows' },
-    maxShift: { type: 'number', min: 0, max: 60, step: 1, default: 12, label: 'max shift, cells' },
+    maxShift: { type: 'number', min: 0, max: 60, step: 1, default: 12, label: 'max shift, cells', random: [4, 25] },
   },
   create(p) {
     return {

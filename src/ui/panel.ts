@@ -2,6 +2,7 @@ import type { Polarity } from '../core/field.ts';
 import type { RampName } from '../core/ramp.ts';
 import type { AnyEffectDef } from '../effects/types.ts';
 import { BUILTIN_PRESETS } from '../presets/builtin.ts';
+import { randomChain } from '../presets/random.ts';
 import {
   applyChain,
   chainToPreset,
@@ -102,9 +103,26 @@ export class ChainPanel {
       row('built-in', this.presetSelect),
       row('name', this.nameInput),
       row('file', button('load…', () => file.click()), button('save', () => this.save())),
+      row('explore', button('random', () => this.randomize(), 'random chain; keeps ramp and polarity')),
       file,
     );
     return box;
+  }
+
+  /** Random chain on the current view; the seed goes into the name to reproduce it. */
+  private randomize(): void {
+    const seed = Math.floor(Math.random() * 1e6);
+    const view = this.host.getView();
+    this.presetSelect.value = '';
+    this.applyPreset({
+      version: 1,
+      name: `Random ${seed}`,
+      ramp: view.ramp,
+      polarity: view.polarity,
+      color: { mode: 'mono' },
+      chain: randomChain(this.host.effects, seed),
+    });
+    this.host.status(`random chain, seed ${seed}`);
   }
 
   private async loadFile(file: File): Promise<void> {

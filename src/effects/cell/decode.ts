@@ -39,9 +39,9 @@ export const decode = defineEffect({
   kind: 'cell',
   params: {
     center: { type: 'point', default: 'center' },
-    speed: { type: 'number', min: 1, max: 400, step: 1, default: 60, label: 'front, cells/s' },
-    scramble: { type: 'number', min: 0, max: 3, step: 0.05, default: 0.6, label: 'scramble, s' },
-    jitter: { type: 'number', min: 0, max: 2, step: 0.05, default: 0.4, label: 'jitter, s' },
+    speed: { type: 'number', min: 1, max: 400, step: 1, default: 60, label: 'front, cells/s', random: [20, 150] },
+    scramble: { type: 'number', min: 0, max: 3, step: 0.05, default: 0.6, label: 'scramble, s', random: [0.2, 1.5] },
+    jitter: { type: 'number', min: 0, max: 2, step: 0.05, default: 0.4, label: 'jitter, s', random: [0, 1] },
     rate: { type: 'number', min: 1, max: 60, step: 1, default: 20, label: 'flicker, 1/s' },
     set: { type: 'select', options: SET_NAMES, default: 'ascii', label: 'glyphs' },
     hideBefore: { type: 'boolean', default: true, label: 'hide before front' },

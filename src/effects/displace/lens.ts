@@ -11,8 +11,8 @@ export const lens = defineEffect({
   kind: 'displace',
   params: {
     center: { type: 'point', default: 'pointer' },
-    radius: { type: 'number', min: 2, max: 100, step: 1, default: 18, label: 'radius, cells' },
-    strength: { type: 'number', min: -1, max: 0.9, step: 0.05, default: 0.5 },
+    radius: { type: 'number', min: 2, max: 100, step: 1, default: 18, label: 'radius, cells', random: [10, 35] },
+    strength: { type: 'number', min: -1, max: 0.9, step: 0.05, default: 0.5, random: [-0.6, 0.7] },
   },
   create(p) {
     return {

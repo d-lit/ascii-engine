@@ -19,9 +19,9 @@ export const liquid = defineEffect({
   name: 'Liquid',
   kind: 'displace',
   params: {
-    amplitude: { type: 'number', min: 0, max: 10, step: 0.1, default: 2, label: 'amplitude, cells' },
-    scale: { type: 'number', min: 4, max: 100, step: 1, default: 20, label: 'scale, cells' },
-    speed: { type: 'number', min: 0, max: 2, step: 0.01, default: 0.3 },
+    amplitude: { type: 'number', min: 0, max: 10, step: 0.1, default: 2, label: 'amplitude, cells', random: [0.5, 4] },
+    scale: { type: 'number', min: 4, max: 100, step: 1, default: 20, label: 'scale, cells', random: [10, 50] },
+    speed: { type: 'number', min: 0, max: 2, step: 0.01, default: 0.3, random: [0.05, 0.6] },
     octaves: { type: 'number', min: 1, max: 4, step: 1, default: 2 },
   },
   create(p) {

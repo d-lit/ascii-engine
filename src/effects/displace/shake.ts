@@ -16,8 +16,8 @@ export const shake = defineEffect({
   kind: 'displace',
   params: {
     mode: { type: 'select', options: ['smooth', 'jitter'], default: 'smooth' },
-    amplitude: { type: 'number', min: 0, max: 5, step: 0.05, default: 0.6, label: 'amplitude, cells' },
-    frequency: { type: 'number', min: 0.5, max: 60, step: 0.5, default: 8, label: 'frequency, Hz' },
+    amplitude: { type: 'number', min: 0, max: 5, step: 0.05, default: 0.6, label: 'amplitude, cells', random: [0.1, 1.2] },
+    frequency: { type: 'number', min: 0.5, max: 60, step: 0.5, default: 8, label: 'frequency, Hz', random: [3, 20] },
   },
   create(p) {
     const noise = createNoise(NOISE_SEED);
