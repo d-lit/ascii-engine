@@ -15,10 +15,20 @@ import type {
   DisplaceFn,
   EffectInstance,
 } from '../effects/types.ts';
-import { createParamBag, resolveParams, type ParamBag, type ParamInput } from './params.ts';
+import { createMaskScratch, fillMask, type MaskScratch, type MaskSpec } from './mask.ts';
+import {
+  createParamBag,
+  resolveNumber,
+  resolveParams,
+  type NumberSpec,
+  type ParamBag,
+  type ParamInput,
+  type ParamValue,
+} from './params.ts';
 
 export const MAX_DT = 1 / 20;
 const DEFAULT_SEED = 0x5eed;
+const MIX_SPEC: NumberSpec = { type: 'number', min: 0, max: 1, default: 1 };
 
 export interface ChainEntry {
   readonly def: AnyEffectDef;
@@ -29,6 +39,23 @@ export interface ChainEntry {
   readonly params: ParamBag;
   readonly keys: readonly string[];
   instance: EffectInstance;
+  /** ctx.time when the effect was last activated; LFO/envelope clock origin. */
+  activatedAt: number;
+  /** Strength 0..1, may be modulated; set directly, re-resolved every frame. */
+  mix: ParamValue;
+  /** Where the effect applies; change through Pipeline.setMask (it owns the buffer). */
+  readonly mask: MaskSpec | null;
+}
+
+export interface AddOptions {
+  mix?: ParamValue;
+  mask?: MaskSpec | null;
+}
+
+/** Engine-side state of an entry, kept out of the public shape. */
+interface EntryState {
+  maskBuf: Float32Array | null;
+  readonly scratch: MaskScratch;
 }
 
 /** Milliseconds spent per stage in the last frame. */
@@ -56,8 +83,16 @@ export class Pipeline {
   private source: Field;
   private work: WorkBuffer;
   private seed: number;
+  private readonly state = new Map<ChainEntry, EntryState>();
+  // Per-stage lists aligned by index: entry, fn, this frame's mix and mask.
+  private cellEntries: ChainEntry[] = [];
   private cellFns: CellFn[] = [];
+  private cellMix = new Float64Array(0);
+  private cellMasks: Array<Float32Array | null> = [];
+  private displaceEntries: ChainEntry[] = [];
   private displaceFns: DisplaceFn[] = [];
+  private displaceMix = new Float64Array(0);
+  private displaceMasks: Array<Float32Array | null> = [];
   private readonly at: Vec2 = { x: 0, y: 0 };
   private readonly cell: CellRef = { lum: 0, alpha: 0, r: 0, g: 0, b: 0, char: 0 };
 
@@ -94,6 +129,7 @@ export class Pipeline {
     ctx.cols = source.cols;
     ctx.rows = source.rows;
     ctx.cellAspect = meta.cellAspect;
+    for (const entry of this.chain) this.allocMask(entry);
     this.restart();
   }
 
@@ -105,13 +141,18 @@ export class Pipeline {
     ctx.frame = 0;
     ctx.rand = createRand(this.seed);
     for (const entry of this.chain) {
+      entry.activatedAt = 0;
       this.resolve(entry);
       entry.instance = entry.def.create(entry.params);
     }
     this.rebuild();
   }
 
-  add(def: AnyEffectDef, values: Record<string, ParamInput> = {}): ChainEntry {
+  add(
+    def: AnyEffectDef,
+    values: Record<string, ParamInput> = {},
+    opts: AddOptions = {},
+  ): ChainEntry {
     const params = createParamBag(def.params);
     const keys = Object.keys(def.params);
     const entry: ChainEntry = {
@@ -121,7 +162,12 @@ export class Pipeline {
       params,
       keys,
       instance: { kind: 'cell', apply: noopCell },
+      activatedAt: this.ctx.time,
+      mix: opts.mix ?? 1,
+      mask: opts.mask ?? null,
     };
+    this.state.set(entry, { maskBuf: null, scratch: createMaskScratch() });
+    this.allocMask(entry);
     this.resolve(entry);
     entry.instance = def.create(params);
     this.chain.push(entry);
@@ -132,12 +178,30 @@ export class Pipeline {
   remove(entry: ChainEntry): void {
     const i = this.chain.indexOf(entry);
     if (i >= 0) this.chain.splice(i, 1);
+    this.state.delete(entry);
+    this.rebuild();
+  }
+
+  /** Moves an entry to `index` in the chain (order = application order). */
+  move(entry: ChainEntry, index: number): void {
+    const from = this.chain.indexOf(entry);
+    if (from < 0) return;
+    this.chain.splice(from, 1);
+    const to = Math.max(0, Math.min(this.chain.length, index));
+    this.chain.splice(to, 0, entry);
+    this.rebuild();
+  }
+
+  setMask(entry: ChainEntry, mask: MaskSpec | null): void {
+    (entry as { mask: MaskSpec | null }).mask = mask;
+    this.allocMask(entry);
     this.rebuild();
   }
 
   /** Enabling is activation: the instance is recreated with fresh state. */
   setEnabled(entry: ChainEntry, enabled: boolean): void {
     if (enabled && !entry.enabled) {
+      entry.activatedAt = this.ctx.time;
       this.resolve(entry);
       entry.instance = entry.def.create(entry.params);
     }
@@ -157,6 +221,8 @@ export class Pipeline {
       const entry = this.chain[e]!;
       if (entry.enabled) this.resolve(entry);
     }
+    this.resolveWeights(this.cellEntries, this.cellMix);
+    this.resolveWeights(this.displaceEntries, this.displaceMix);
     const t1 = performance.now();
 
     if (this.displaceFns.length > 0) this.runDisplace();
@@ -178,21 +244,62 @@ export class Pipeline {
   }
 
   private resolve(entry: ChainEntry): void {
-    resolveParams(entry.def.params, entry.keys, entry.values, this.ctx, entry.params);
+    const t = this.ctx.time - entry.activatedAt;
+    resolveParams(entry.def.params, entry.keys, entry.values, this.ctx, entry.params, t);
   }
 
-  /** Flat lists of enabled stage functions; rebuilt on chain edits, not per frame. */
+  private allocMask(entry: ChainEntry): void {
+    const st = this.state.get(entry);
+    if (st === undefined) return;
+    const n = this.source.cols * this.source.rows;
+    if (entry.mask === null) st.maskBuf = null;
+    else if (st.maskBuf === null || st.maskBuf.length !== n) st.maskBuf = new Float32Array(n);
+  }
+
+  /** Per frame: mix values and mask buffers for one stage's entries. */
+  private resolveWeights(entries: readonly ChainEntry[], mix: Float64Array): void {
+    const ctx = this.ctx;
+    for (let f = 0; f < entries.length; f++) {
+      const entry = entries[f]!;
+      const t = ctx.time - entry.activatedAt;
+      mix[f] = resolveNumber(MIX_SPEC, entry.mix, t);
+      const st = this.state.get(entry);
+      if (entry.mask !== null && st !== undefined && st.maskBuf !== null) {
+        fillMask(entry.mask, this.source, ctx, t, st.scratch, st.maskBuf);
+      }
+    }
+  }
+
+  /** Flat per-stage lists of enabled effects; rebuilt on chain edits, not per frame. */
   private rebuild(): void {
-    const cells: CellFn[] = [];
-    const displaces: DisplaceFn[] = [];
+    const cellEntries: ChainEntry[] = [];
+    const cellFns: CellFn[] = [];
+    const cellMasks: Array<Float32Array | null> = [];
+    const displaceEntries: ChainEntry[] = [];
+    const displaceFns: DisplaceFn[] = [];
+    const displaceMasks: Array<Float32Array | null> = [];
     for (const entry of this.chain) {
       if (!entry.enabled) continue;
       const inst = entry.instance;
-      if (inst.kind === 'cell') cells.push(inst.apply);
-      else if (inst.kind === 'displace') displaces.push(inst.apply);
+      const mask = this.state.get(entry)?.maskBuf ?? null;
+      if (inst.kind === 'cell') {
+        cellEntries.push(entry);
+        cellFns.push(inst.apply);
+        cellMasks.push(mask);
+      } else if (inst.kind === 'displace') {
+        displaceEntries.push(entry);
+        displaceFns.push(inst.apply);
+        displaceMasks.push(mask);
+      }
     }
-    this.cellFns = cells;
-    this.displaceFns = displaces;
+    this.cellEntries = cellEntries;
+    this.cellFns = cellFns;
+    this.cellMasks = cellMasks;
+    this.cellMix = new Float64Array(cellFns.length).fill(1);
+    this.displaceEntries = displaceEntries;
+    this.displaceFns = displaceFns;
+    this.displaceMasks = displaceMasks;
+    this.displaceMix = new Float64Array(displaceFns.length).fill(1);
   }
 
   /**
@@ -203,7 +310,7 @@ export class Pipeline {
    * (DECISIONS 013) except the displace fns, which receive integers.
    */
   private runDisplace(): void {
-    const { work, source, displaceFns, ctx, at } = this;
+    const { work, source, displaceFns, displaceMix, displaceMasks, ctx, at } = this;
     const { cols, rows } = work;
     const sLum = source.lum;
     const sAlpha = source.alpha;
@@ -222,7 +329,22 @@ export class Pipeline {
       for (let x = 0; x < cols; x++, i++) {
         at.x = x;
         at.y = y;
-        for (let f = 0; f < nFns; f++) displaceFns[f]!(x, y, ctx, at);
+        for (let f = 0; f < nFns; f++) {
+          // Weight = mix * mask (SPEC 6.4): 0 skips, 1 is the plain call,
+          // in between scales this effect's displacement.
+          const mask = displaceMasks[f]!;
+          const w = mask === null ? displaceMix[f]! : displaceMix[f]! * mask[i]!;
+          if (w <= 0) continue;
+          if (w >= 1) {
+            displaceFns[f]!(x, y, ctx, at);
+            continue;
+          }
+          const bx = at.x;
+          const by = at.y;
+          displaceFns[f]!(x, y, ctx, at);
+          at.x = bx + (at.x - bx) * w;
+          at.y = by + (at.y - by) * w;
+        }
 
         // Math.min/max keep these float64 throughout; a ternary mixing the Smi
         // 0 with a double makes Maglev box the result (DECISIONS 013).
@@ -265,7 +387,7 @@ export class Pipeline {
 
   /** One reusable CellRef per frame (SPEC 6.2); `char` maps to charOverride. */
   private runCells(): void {
-    const { work, cell, cellFns, ctx } = this;
+    const { work, cell, cellFns, cellMix, cellMasks, ctx } = this;
     const { lum, alpha, color, charOverride, cols, rows } = work;
     const nFns = cellFns.length;
 
@@ -282,7 +404,30 @@ export class Pipeline {
           cell.b = color[i * 3 + 2]!;
         }
 
-        for (let f = 0; f < nFns; f++) cellFns[f]!(cell, x, y, ctx);
+        for (let f = 0; f < nFns; f++) {
+          // Weight = mix * mask (SPEC 6.4): 0 skips, 1 is the plain call, in
+          // between blends numeric fields; char follows the stronger side.
+          const mask = cellMasks[f]!;
+          const w = mask === null ? cellMix[f]! : cellMix[f]! * mask[i]!;
+          if (w <= 0) continue;
+          if (w >= 1) {
+            cellFns[f]!(cell, x, y, ctx);
+            continue;
+          }
+          const bl = cell.lum;
+          const ba = cell.alpha;
+          const br = cell.r;
+          const bg = cell.g;
+          const bb = cell.b;
+          const bc = cell.char;
+          cellFns[f]!(cell, x, y, ctx);
+          cell.lum = bl + (cell.lum - bl) * w;
+          cell.alpha = ba + (cell.alpha - ba) * w;
+          cell.r = br + (cell.r - br) * w;
+          cell.g = bg + (cell.g - bg) * w;
+          cell.b = bb + (cell.b - bb) * w;
+          if (w <= 0.5) cell.char = bc;
+        }
 
         lum[i] = cell.lum;
         alpha[i] = cell.alpha;

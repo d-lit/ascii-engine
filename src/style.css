@@ -7,7 +7,7 @@
   --accent: #7dd3a0;
 
   --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-  --panel-w: 280px;
+  --panel-w: 320px;
 
   color-scheme: dark;
   font: 13px/1.4 var(--mono);
@@ -176,4 +176,125 @@ body {
   color: var(--muted);
   border-color: var(--border);
   cursor: default;
+}
+
+/* ---- phase 4 panel ---- */
+
+#panel section + section,
+#panel section + div,
+#panel div + section {
+  margin-top: 4px;
+}
+
+#panel .row > input[type='text'] {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 2px 6px;
+}
+
+#panel input.invalid {
+  border-color: #d26a6a;
+}
+
+#panel .row > select.mode {
+  flex: 0 0 auto;
+  width: auto;
+}
+
+#panel .hint {
+  color: var(--muted);
+  margin: 4px 0 8px;
+}
+
+#panel .fx {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  margin-bottom: 6px;
+  background: rgb(255 255 255 / 0.015);
+}
+
+#panel .fx.off .fx-name {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+#panel .fx-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+}
+
+#panel .fx-head button {
+  padding: 0 6px;
+}
+
+#panel .fx-head button:disabled {
+  visibility: hidden;
+}
+
+#panel .fx-head .fx-name {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  border: none;
+  background: none;
+  padding: 2px 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#panel .fx-head .fx-name::before {
+  content: '▸ ';
+  color: var(--muted);
+}
+
+#panel .fx.open .fx-head .fx-name::before {
+  content: '▾ ';
+}
+
+#panel .fx-kind {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+#panel .fx-body {
+  padding: 6px 8px 2px;
+  border-top: 1px solid var(--border);
+}
+
+#panel .fx-body[hidden] {
+  display: none;
+}
+
+#panel .fx-body .params {
+  margin: 4px 0 6px;
+  padding-left: 0;
+  border-left: none;
+}
+
+#panel .mod-head {
+  margin-bottom: 4px;
+}
+
+#panel .mod-body {
+  margin: 0 0 8px;
+  padding-left: 10px;
+  border-left: 1px solid var(--accent);
+}
+
+#panel .mod-body .row > span {
+  flex-basis: 64px;
+}
+
+#panel .mask {
+  margin-bottom: 4px;
 }

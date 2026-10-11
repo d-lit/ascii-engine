@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "name": "Liquid portrait",
+  "ramp": "classic",
+  "polarity": "light-on-dark",
+  "color": { "mode": "mono" },
+  "chain": [
+    {
+      "effect": "liquid",
+      "params": { "amplitude": 1.6, "scale": 26, "speed": 0.25 }
+    },
+    {
+      "effect": "ripple",
+      "params": {
+        "center": "pointer",
+        "amplitude": { "lfo": "sine", "freq": 0.2, "min": 0.6, "max": 2.2 },
+        "wavelength": 14,
+        "speed": 18,
+        "decay": 35
+      }
+    },
+    {
+      "effect": "decode",
+      "params": { "speed": 80, "scramble": 0.8, "jitter": 0.6, "set": "ascii" },
+      "mask": { "type": "alpha" }
+    }
+  ]
+}

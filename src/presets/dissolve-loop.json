@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "name": "Dissolve loop",
+  "ramp": "long",
+  "polarity": "light-on-dark",
+  "color": { "mode": "mono" },
+  "chain": [
+    {
+      "effect": "wave",
+      "params": { "direction": 30, "wavelength": 40, "speed": 0.15, "amplitude": 0.12 }
+    },
+    {
+      "effect": "erosion",
+      "params": {
+        "threshold": { "env": [[0, 0], [1, 0], [5, 0.95], [6, 0.95], [10, 0]], "loop": true, "ease": "smooth" },
+        "softness": 0.12,
+        "scale": 18,
+        "speed": 0.15
+      }
+    }
+  ]
+}

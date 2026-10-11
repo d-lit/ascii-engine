@@ -1,4 +1,5 @@
 import type { Vec2 } from '../core/math.ts';
+import { resolveMod } from './modulation.ts';
 
 export type PointValue = Vec2 | 'pointer' | 'center';
 
@@ -20,10 +21,26 @@ export type ParamSpec =
 
 export type LfoShape = 'sine' | 'triangle' | 'saw' | 'square' | 'noise';
 
-export type ParamValue =
-  | number
-  | { lfo: LfoShape; freq: number; min: number; max: number; phase?: number }
-  | { env: Array<[t: number, v: number]>; loop?: boolean; ease?: 'linear' | 'smooth' };
+/** Periodic modulation; `phase` is a fraction of a period, 0..1. */
+export interface LfoValue {
+  lfo: LfoShape;
+  freq: number;
+  min: number;
+  max: number;
+  phase?: number;
+}
+
+/** Breakpoints `[seconds since activation, value]`, sorted by time. */
+export interface EnvValue {
+  env: Array<[t: number, v: number]>;
+  loop?: boolean;
+  ease?: 'linear' | 'smooth';
+}
+
+/** A modulated number: any object form resolved by a registered ModSource. */
+export type ModValue = LfoValue | EnvValue;
+
+export type ParamValue = number | ModValue;
 
 export type ParamSchema = Record<string, ParamSpec>;
 
@@ -52,18 +69,24 @@ export type ParamBag = Record<string, number | boolean | string | Vec2>;
 
 /** Grid facts needed to place point params; FrameContext satisfies it. */
 export interface ParamFrame {
-  time: number;
   cols: number;
   rows: number;
   pointer: Vec2;
 }
 
 /**
- * Number value at `time`, clamped to the spec. LFO and envelopes arrive in
- * phase 4; until then a modulated value resolves to the default.
+ * Number value `t` seconds after the effect's activation, clamped to the spec.
+ * Object values go through the modulation registry; anything it cannot
+ * resolve falls back to the default.
  */
-export function resolveNumber(spec: NumberSpec, value: ParamInput | undefined): number {
-  const v = typeof value === 'number' && Number.isFinite(value) ? value : spec.default;
+export function resolveNumber(spec: NumberSpec, value: ParamInput | undefined, t: number): number {
+  let v = spec.default;
+  if (typeof value === 'number') {
+    if (Number.isFinite(value)) v = value;
+  } else if (typeof value === 'object' && value !== null && !('x' in value)) {
+    const m = resolveMod(value, t);
+    if (m !== undefined && Number.isFinite(m)) v = m;
+  }
   return v < spec.min ? spec.min : v > spec.max ? spec.max : v;
 }
 
@@ -107,6 +130,8 @@ export function resolveParams(
   values: Readonly<Record<string, ParamInput>>,
   frame: ParamFrame,
   bag: ParamBag,
+  /** Seconds since the effect was activated; modulation clock. */
+  t: number,
 ): void {
   for (let k = 0; k < keys.length; k++) {
     const key = keys[k]!;
@@ -114,7 +139,7 @@ export function resolveParams(
     const value = values[key];
     switch (spec.type) {
       case 'number':
-        bag[key] = resolveNumber(spec, value);
+        bag[key] = resolveNumber(spec, value, t);
         break;
       case 'boolean':
         bag[key] = typeof value === 'boolean' ? value : spec.default;

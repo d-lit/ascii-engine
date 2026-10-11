@@ -1,5 +1,5 @@
 import './style.css';
-import type { Field, FieldMeta, Polarity, WorkBuffer } from './core/field.ts';
+import { createField, type Field, type FieldMeta, type Polarity, type WorkBuffer } from './core/field.ts';
 import { createLoop } from './core/loop.ts';
 import { PointerInput } from './core/pointer.ts';
 import { computeRows, importImage } from './core/import-image.ts';
@@ -13,14 +13,13 @@ import {
   type RampName,
 } from './core/ramp.ts';
 import { registerBuiltinEffects } from './effects/builtin.ts';
-import { listEffects } from './effects/registry.ts';
-import type { AnyEffectDef } from './effects/types.ts';
-import type { ParamInput } from './pipeline/params.ts';
-import { Pipeline, type ChainEntry } from './pipeline/pipeline.ts';
+import { getEffect, listEffects } from './effects/registry.ts';
+import { Pipeline } from './pipeline/pipeline.ts';
 import { Canvas2DRenderer } from './render/canvas2d.ts';
 import { exportText } from './render/export-text.ts';
-import { buildParamControls } from './ui/controls.ts';
+import { button, checkbox, row, selectOf } from './ui/controls.ts';
 import { DebugOverlay } from './ui/debug-overlay.ts';
+import { ChainPanel, type ViewSettings } from './ui/panel.ts';
 
 const CELL_ASPECT = 0.55;
 const FONT_FAMILY = "ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
@@ -82,11 +81,15 @@ let textFieldPolarity: Polarity | null = null;
 let field: Field | null = null;
 let ramp: Ramp | null = null;
 let meta: FieldMeta = { cellAspect: CELL_ASPECT, polarity: settings.polarity };
-let pipeline: Pipeline | null = null;
 // Last rendered frame, for export.
 let lastWork: WorkBuffer | null = null;
 
 const input = new PointerInput(canvas, () => ({ cols: field?.cols ?? 1, rows: field?.rows ?? 1 }));
+
+// The pipeline exists from the start (on an empty 1x1 field), so the chain and
+// presets can be edited before any picture is loaded.
+registerBuiltinEffects();
+const pipeline = new Pipeline(createField(1, 1), meta, input.pointer);
 const overlay = new DebugOverlay(stage, ['params', 'sample', 'cell', 'render', 'total']);
 const stageMs = new Float64Array(5);
 overlay.visible = false;
@@ -130,15 +133,7 @@ function rebuild(): void {
   }
 
   // Effects restart only when the picture itself changes (DECISIONS 012).
-  if (pipeline === null) {
-    pipeline = new Pipeline(next, meta, input.pointer);
-    for (const slot of effectSlots) {
-      slot.entry = pipeline.add(slot.def, slot.values);
-      pipeline.setEnabled(slot.entry, slot.enabled);
-    }
-  } else if (next !== field) {
-    pipeline.setSource(next, meta);
-  }
+  if (next !== field) pipeline.setSource(next, meta);
   field = next;
 
   overlay.setInfo(`${next.cols}×${next.rows} · cell ${font.cellW}×${font.cellH}`);
@@ -149,7 +144,7 @@ function rebuild(): void {
 // ---- frame ----
 
 function frame(dt: number): void {
-  if (pipeline === null || ramp === null) return;
+  if (source === null || ramp === null) return;
   input.tick(dt);
   const work = pipeline.frame(dt);
   lastWork = work;
@@ -228,24 +223,18 @@ stage.addEventListener('drop', (e) => {
   if (file) void load(file);
 });
 
-// ---- panel ----
+// ---- panel: view ----
 
-function row(label: string, control: HTMLElement): HTMLLabelElement {
-  const wrap = document.createElement('label');
-  wrap.className = 'row';
-  const caption = document.createElement('span');
-  caption.textContent = label;
-  wrap.append(caption, control);
-  panel.append(wrap);
-  return wrap;
+function section(title: string): HTMLElement {
+  const box = document.createElement('section');
+  const h = document.createElement('h3');
+  h.textContent = title;
+  box.append(h);
+  panel.append(box);
+  return box;
 }
 
-function select<T extends string>(options: readonly T[], value: T, onChange: (v: T) => void) {
-  const node = document.createElement('select');
-  for (const option of options) node.add(new Option(option, option, false, option === value));
-  node.addEventListener('change', () => onChange(node.value as T));
-  return node;
-}
+const view = section('view');
 
 const fileInput = document.createElement('input');
 fileInput.type = 'file';
@@ -254,7 +243,6 @@ fileInput.addEventListener('change', () => {
   const file = fileInput.files?.[0];
   if (file) void load(file);
 });
-row('source', fileInput);
 
 const colsInput = document.createElement('input');
 colsInput.type = 'range';
@@ -268,94 +256,67 @@ colsInput.addEventListener('input', () => {
   colsValue.textContent = colsInput.value;
   safeRebuild();
 });
-const colsRow = row('cols', colsInput);
-colsRow.append(colsValue);
+const colsRow = row('cols', colsInput, colsValue);
 
-row(
-  'ramp',
-  select(Object.keys(BUILTIN_RAMP_CHARS) as RampName[], settings.ramp, (v) => {
-    settings.ramp = v;
-    safeRebuild();
-  }),
-);
-
-row(
-  'polarity',
-  select(['light-on-dark', 'dark-on-light'] as const, settings.polarity, (v) => {
-    settings.polarity = v;
-    stage.dataset.polarity = v;
-    safeRebuild();
-  }),
-);
-
-row(
-  'quantize',
-  select(['nearest-density', 'uniform'] as const, settings.quantizeMode, (v) => {
-    settings.quantizeMode = v;
-    // Render-only setting: the running loop picks it up next frame.
-    renderer.setOptions({ quantizeMode: v });
-  }),
-);
-
-const sourceChars = document.createElement('input');
-sourceChars.type = 'checkbox';
-sourceChars.checked = settings.useSourceChars;
-sourceChars.addEventListener('change', () => {
-  settings.useSourceChars = sourceChars.checked;
-  renderer.setOptions({ useSourceChars: sourceChars.checked });
+const rampSelect = selectOf(Object.keys(BUILTIN_RAMP_CHARS) as RampName[], settings.ramp, (v) => {
+  settings.ramp = v;
+  safeRebuild();
 });
-const sourceCharsRow = row('source chars', sourceChars);
+
+const polaritySelect = selectOf(['light-on-dark', 'dark-on-light'] as const, settings.polarity, (v) => {
+  settings.polarity = v;
+  stage.dataset.polarity = v;
+  safeRebuild();
+});
+
+const quantizeSelect = selectOf(['nearest-density', 'uniform'] as const, settings.quantizeMode, (v) => {
+  settings.quantizeMode = v;
+  // Render-only setting: the running loop picks it up next frame.
+  renderer.setOptions({ quantizeMode: v });
+});
+
+const sourceCharsRow = row('source chars', checkbox(settings.useSourceChars, (on) => {
+  settings.useSourceChars = on;
+  renderer.setOptions({ useSourceChars: on });
+}));
 sourceCharsRow.hidden = true;
 
-const debugToggle = document.createElement('input');
-debugToggle.type = 'checkbox';
-debugToggle.checked = true;
-debugToggle.addEventListener('change', () => {
-  overlay.visible = debugToggle.checked && source !== null;
+const debugToggle = checkbox(true, (on) => {
+  overlay.visible = on && source !== null;
 });
-row('debug', debugToggle);
 
-// ---- effects (temporary list; the chain editor arrives in phase 4) ----
+view.append(
+  row('source', fileInput),
+  colsRow,
+  row('ramp', rampSelect),
+  row('polarity', polaritySelect),
+  row('quantize', quantizeSelect),
+  sourceCharsRow,
+  row('debug', debugToggle),
+  row('time', button('restart', () => pipeline.restart())),
+);
 
-interface EffectSlot {
-  readonly def: AnyEffectDef;
-  readonly values: Record<string, ParamInput>;
-  enabled: boolean;
-  entry: ChainEntry | null;
+function setView(next: ViewSettings): void {
+  settings.ramp = next.ramp;
+  settings.polarity = next.polarity;
+  rampSelect.value = next.ramp;
+  polaritySelect.value = next.polarity;
+  stage.dataset.polarity = next.polarity;
+  safeRebuild();
 }
 
-registerBuiltinEffects();
-const effectSlots: EffectSlot[] = listEffects().map((def) => ({
-  def,
-  values: {},
-  enabled: false,
-  entry: null,
-}));
+// ---- panel: presets and chain ----
 
-const effectsTitle = document.createElement('h3');
-effectsTitle.textContent = 'effects';
-panel.append(effectsTitle);
-
-for (const slot of effectSlots) {
-  const toggle = document.createElement('input');
-  toggle.type = 'checkbox';
-  const params = buildParamControls(slot.def.params, slot.values);
-  params.hidden = true;
-  toggle.addEventListener('change', () => {
-    slot.enabled = toggle.checked;
-    params.hidden = !toggle.checked;
-    if (pipeline !== null && slot.entry !== null) pipeline.setEnabled(slot.entry, slot.enabled);
-  });
-  const head = row(slot.def.name, toggle);
-  head.classList.add('effect');
-  panel.append(params);
-}
-
-const restartButton = document.createElement('button');
-restartButton.type = 'button';
-restartButton.textContent = 'restart';
-restartButton.addEventListener('click', () => pipeline?.restart());
-row('time', restartButton);
+const chainRoot = document.createElement('div');
+panel.append(chainRoot);
+const chainPanel = new ChainPanel(chainRoot, {
+  pipeline,
+  effects: listEffects(),
+  lookup: getEffect,
+  getView: () => ({ ramp: settings.ramp, polarity: settings.polarity }),
+  setView,
+  status: (m) => setStatus(m),
+});
 
 // ---- export ----
 
@@ -373,13 +334,7 @@ function baseName(name: string): string {
   return dot > 0 ? name.slice(0, dot) : name;
 }
 
-const trimToggle = document.createElement('input');
-trimToggle.type = 'checkbox';
-trimToggle.checked = settings.trimRight;
-trimToggle.addEventListener('change', () => {
-  settings.trimRight = trimToggle.checked;
-});
-row('trim', trimToggle);
+const exportBox = section('export');
 
 const copyButton = document.createElement('button');
 copyButton.type = 'button';
@@ -412,13 +367,12 @@ saveButton.addEventListener('click', () => {
   URL.revokeObjectURL(url);
 });
 
-// A div, not a label: clicking the caption must not press a button.
-const exportRow = document.createElement('div');
-exportRow.className = 'row';
-const exportCaption = document.createElement('span');
-exportCaption.textContent = 'export';
-exportRow.append(exportCaption, copyButton, saveButton);
-panel.append(exportRow);
+exportBox.append(
+  row('trim', checkbox(settings.trimRight, (on) => {
+    settings.trimRight = on;
+  })),
+  row('text', copyButton, saveButton),
+);
 
 const status = document.createElement('p');
 status.className = 'status';
@@ -438,3 +392,6 @@ new ResizeObserver(() => {
     safeRebuild();
   });
 }).observe(stage);
+
+// Start with the first built-in preset: effects run as soon as a picture lands.
+chainPanel.selectBuiltin(0);

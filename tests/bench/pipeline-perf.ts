@@ -17,7 +17,7 @@ import { ripple } from '../../src/effects/displace/ripple.ts';
 import { shake } from '../../src/effects/displace/shake.ts';
 import { swirl } from '../../src/effects/displace/swirl.ts';
 import type { AnyEffectDef } from '../../src/effects/types.ts';
-import { createPointer, Pipeline } from '../../src/pipeline/pipeline.ts';
+import { createPointer, Pipeline, type AddOptions } from '../../src/pipeline/pipeline.ts';
 
 // The project has no @types/node; this script needs just these bits.
 declare const process: {
@@ -29,7 +29,7 @@ const ROWS = 100;
 const WARMUP = 200;
 const FRAMES = 600;
 
-function makePipeline(defs: AnyEffectDef[]): Pipeline {
+function makePipeline(defs: AnyEffectDef[], opts: AddOptions = {}): Pipeline {
   const src = createField(COLS, ROWS);
   for (let i = 0; i < src.lum.length; i++) {
     src.lum[i] = (i % COLS) / COLS;
@@ -40,12 +40,14 @@ function makePipeline(defs: AnyEffectDef[]): Pipeline {
   pointer.y = ROWS / 2;
   const p = new Pipeline(src, { cellAspect: 0.55, polarity: 'light-on-dark' }, pointer);
   // Long scramble keeps decode in its most expensive state.
-  for (const def of defs) p.add(def, def === decode ? { speed: 400, scramble: 30, jitter: 0 } : {});
+  for (const def of defs) {
+    p.add(def, def === decode ? { speed: 400, scramble: 30, jitter: 0 } : {}, opts);
+  }
   return p;
 }
 
-function measure(defs: AnyEffectDef[]): { median: number; p95: number } {
-  const p = makePipeline(defs);
+function measure(defs: AnyEffectDef[], opts: AddOptions = {}): { median: number; p95: number } {
+  const p = makePipeline(defs, opts);
   for (let i = 0; i < WARMUP; i++) p.frame(1 / 60);
   const times = new Float64Array(FRAMES);
   if (only !== undefined) console.log('--- measure start');
@@ -62,7 +64,13 @@ function measure(defs: AnyEffectDef[]): { median: number; p95: number } {
   };
 }
 
-const cases: Array<[string, AnyEffectDef[]]> = [
+const ALL_TEN = [ripple, swirl, lens, liquid, glitchRows, shake, wave, pulse, erosion, decode];
+const MASKED: AddOptions = {
+  mix: { lfo: 'sine', freq: 0.5, min: 0.3, max: 0.7 },
+  mask: { type: 'radial', center: 'pointer', radius: 30, soft: 10 },
+};
+
+const cases: Array<[string, AnyEffectDef[], AddOptions?]> = [
   ['copy only', []],
   ['wave', [wave]],
   ['pulse', [pulse]],
@@ -76,15 +84,16 @@ const cases: Array<[string, AnyEffectDef[]]> = [
   ['glitch', [glitchRows]],
   ['shake', [shake]],
   ['ripple+liquid+wave+erosion', [ripple, liquid, wave, erosion]],
-  ['all ten', [ripple, swirl, lens, liquid, glitchRows, shake, wave, pulse, erosion, decode]],
+  ['all ten', ALL_TEN],
+  ['all ten, mix + radial mask', ALL_TEN, MASKED],
 ];
 
 // ONLY=<case name> runs a single case, e.g. with --trace-gc to count scavenges.
 const only = process.env.ONLY;
 console.log(`pipeline.frame ${COLS}x${ROWS}, ${FRAMES} frames`);
-for (const [name, defs] of cases) {
+for (const [name, defs, opts] of cases) {
   if (only !== undefined && name !== only) continue;
-  const r = measure(defs);
+  const r = measure(defs, opts);
   console.log(
     `${name.padEnd(28)} median ${r.median.toFixed(2).padStart(6)} ms  p95 ${r.p95.toFixed(2).padStart(6)} ms`,
   );
