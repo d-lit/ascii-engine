@@ -36,6 +36,12 @@ export interface EffectDef<P extends ParamSchema> {
   name: string;
   kind: EffectKind;
   params: P;
+  /**
+   * Cell effects that write r, g, b set this: they run in the post stage,
+   * after the base colour is chosen, so the colour mode does not overwrite
+   * them (DECISIONS 016). Their lum changes no longer affect the colour.
+   */
+  writesColor?: boolean;
   create(params: ResolvedParams<P>): EffectInstance;
 }
 
@@ -45,6 +51,7 @@ export interface AnyEffectDef {
   readonly name: string;
   readonly kind: EffectKind;
   readonly params: ParamSchema;
+  readonly writesColor: boolean;
   /** `params` is a live bag the engine re-resolves every frame. */
   create(params: ParamBag): EffectInstance;
 }
@@ -59,6 +66,7 @@ export function defineEffect<const P extends ParamSchema>(def: EffectDef<P>): An
     name: def.name,
     kind: def.kind,
     params: def.params,
+    writesColor: def.writesColor === true,
     // The engine builds the bag from this very schema (createParamBag), so the
     // shape matches ResolvedParams<P>; TS cannot see that through the erasure.
     create: (params) => def.create(params as ResolvedParams<P>),

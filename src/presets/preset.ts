@@ -1,6 +1,13 @@
 import type { Polarity } from '../core/field.ts';
 import { BUILTIN_RAMP_CHARS, type RampName } from '../core/ramp.ts';
 import type { AnyEffectDef } from '../effects/types.ts';
+import { isHexColor } from '../core/color.ts';
+import {
+  COLOR_MODES,
+  DEFAULT_STOPS,
+  type ColorSettings,
+  type GradientStop,
+} from '../pipeline/colorize.ts';
 import { MASK_TYPES, type MaskSpec } from '../pipeline/mask.ts';
 import { resolveMod } from '../pipeline/modulation.ts';
 import type { ParamInput, ParamSpec, ParamValue, PointValue } from '../pipeline/params.ts';
@@ -8,8 +15,7 @@ import type { ChainEntry, Pipeline } from '../pipeline/pipeline.ts';
 
 export const PRESET_VERSION = 1;
 
-/** Reserved for colour (DECISIONS 015); only `mono` is rendered today. */
-export type ColorMode = 'mono' | 'source' | 'gradient';
+export const MAX_STOPS = 8;
 
 export interface PresetEffect {
   effect: string;
@@ -24,7 +30,7 @@ export interface Preset {
   name: string;
   ramp: RampName;
   polarity: Polarity;
-  color: { mode: ColorMode };
+  color: ColorSettings;
   chain: PresetEffect[];
 }
 
@@ -37,15 +43,13 @@ export type EffectLookup = (id: string) => AnyEffectDef | undefined;
 
 const RAMPS = Object.keys(BUILTIN_RAMP_CHARS) as RampName[];
 const POLARITIES: readonly Polarity[] = ['light-on-dark', 'dark-on-light'];
-const COLOR_MODES: readonly ColorMode[] = ['mono', 'source', 'gradient'];
-const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 
 export const DEFAULT_PRESET: Preset = {
   version: PRESET_VERSION,
   name: 'Untitled',
   ramp: 'classic',
   polarity: 'light-on-dark',
-  color: { mode: 'mono' },
+  color: { mode: 'mono', stops: [...DEFAULT_STOPS] },
   chain: [],
 };
 
@@ -90,7 +94,7 @@ function validParam(spec: ParamSpec, v: unknown): boolean {
     case 'select':
       return oneOf(v, spec.options);
     case 'color':
-      return typeof v === 'string' && HEX.test(v);
+      return isHexColor(v);
     case 'point':
       return isPointValue(v);
   }
@@ -164,6 +168,33 @@ function validateEffect(
   return structuredClone({ effect: def.id, params, enabled, mix, mask });
 }
 
+function validStop(v: unknown): v is GradientStop {
+  return isRecord(v) && finite(v.pos) && v.pos >= 0 && v.pos <= 1 && isHexColor(v.color);
+}
+
+/** Colour block (DECISIONS 015). Missing block or stops fall back to defaults. */
+function validateColor(raw: unknown, warn: (msg: string) => void): ColorSettings {
+  const color: ColorSettings = { mode: 'mono', stops: [...DEFAULT_STOPS] };
+  if (raw === undefined) return color;
+  if (!isRecord(raw)) {
+    warn(`bad color ${show(raw)}, using mono`);
+    return color;
+  }
+  if (oneOf(raw.mode, COLOR_MODES)) color.mode = raw.mode;
+  else warn(`bad color mode ${show(raw.mode)}, using mono`);
+
+  if (raw.stops !== undefined) {
+    const ok =
+      Array.isArray(raw.stops) &&
+      raw.stops.length >= 1 &&
+      raw.stops.length <= MAX_STOPS &&
+      raw.stops.every(validStop);
+    if (ok) color.stops = structuredClone(raw.stops as GradientStop[]);
+    else warn(`bad gradient stops ${show(raw.stops)}, using default gradient`);
+  }
+  return color;
+}
+
 /**
  * Validates untrusted preset data (SPEC 8). Never throws: anything unusable
  * falls back to a default and adds a warning.
@@ -196,13 +227,7 @@ export function validatePreset(raw: unknown, lookup: EffectLookup): PresetLoad {
     else warn(`unknown polarity ${show(raw.polarity)}, using ${polarity}`);
   }
 
-  let colorMode: ColorMode = 'mono';
-  if (raw.color !== undefined) {
-    const mode = isRecord(raw.color) ? raw.color.mode : undefined;
-    if (oneOf(mode, COLOR_MODES)) colorMode = mode;
-    else warn(`bad color ${show(raw.color)}, using mono`);
-    if (colorMode !== 'mono') warn(`color mode "${colorMode}" is not rendered yet, shown as mono`);
-  }
+  const color = validateColor(raw.color, warn);
 
   const chain: PresetEffect[] = [];
   if (raw.chain !== undefined && !Array.isArray(raw.chain)) {
@@ -215,7 +240,7 @@ export function validatePreset(raw: unknown, lookup: EffectLookup): PresetLoad {
   }
 
   return {
-    preset: { version: PRESET_VERSION, name, ramp, polarity, color: { mode: colorMode }, chain },
+    preset: { version: PRESET_VERSION, name, ramp, polarity, color, chain },
     warnings,
   };
 }
@@ -264,7 +289,8 @@ export function serializePreset(preset: Preset): string {
       name: preset.name,
       ramp: preset.ramp,
       polarity: preset.polarity,
-      color: preset.color,
+      // Stops only matter for the gradient mode; keep files short otherwise.
+      color: preset.color.mode === 'gradient' ? preset.color : { mode: preset.color.mode },
       chain,
     },
     null,

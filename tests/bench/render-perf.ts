@@ -10,6 +10,7 @@ import { wave } from '../../src/effects/cell/wave.ts';
 import { liquid } from '../../src/effects/displace/liquid.ts';
 import { ripple } from '../../src/effects/displace/ripple.ts';
 import type { AnyEffectDef } from '../../src/effects/types.ts';
+import type { ColorSettings } from '../../src/pipeline/colorize.ts';
 import { createPointer, Pipeline } from '../../src/pipeline/pipeline.ts';
 import { Compositor, type MaskSource } from '../../src/render/compositor.ts';
 
@@ -41,7 +42,21 @@ function fakeMasks(w: number, h: number): MaskSource {
   return src;
 }
 
-function measure(defs: AnyEffectDef[], cellW: number, cellH: number): [number, number] {
+const GRADIENT: ColorSettings = {
+  mode: 'gradient',
+  stops: [
+    { pos: 0, color: '#1b1a4a' },
+    { pos: 0.5, color: '#d0386b' },
+    { pos: 1, color: '#ffd27a' },
+  ],
+};
+
+function measure(
+  defs: AnyEffectDef[],
+  cellW: number,
+  cellH: number,
+  color?: ColorSettings,
+): [number, number] {
   const field = createField(COLS, ROWS);
   for (let i = 0; i < field.lum.length; i++) {
     field.lum[i] = (i % COLS) / COLS;
@@ -51,6 +66,7 @@ function measure(defs: AnyEffectDef[], cellW: number, cellH: number): [number, n
   pointer.x = COLS / 2;
   pointer.y = ROWS / 2;
   const p = new Pipeline(field, { cellAspect: 0.55, polarity: 'light-on-dark' }, pointer);
+  if (color !== undefined) p.setColor(color, [232, 230, 227]);
   for (const def of defs) p.add(def, def === decode ? { speed: 400, scramble: 30, jitter: 0 } : {});
   const c = new Compositor(COLS, ROWS, cellW, cellH);
   c.setColors([11, 11, 13], [232, 230, 227]);
@@ -74,12 +90,16 @@ function measure(defs: AnyEffectDef[], cellW: number, cellH: number): [number, n
   return [times[FRAMES >> 1]!, times[Math.floor(FRAMES * 0.95)]!];
 }
 
-const cases: Array<[string, AnyEffectDef[]]> = [
+const cases: Array<[string, AnyEffectDef[], ColorSettings?]> = [
   ['static', []],
   ['wave', [wave]],
   ['erosion', [erosion]],
   ['all four', [wave, pulse, erosion, decode]],
   ['ripple+liquid', [ripple, liquid]],
+  ['grad static', [], GRADIENT],
+  ['grad wave', [wave], GRADIENT],
+  ['grad all four', [wave, pulse, erosion, decode], GRADIENT],
+  ['grad ripple+liquid', [ripple, liquid], GRADIENT],
 ];
 
 const only = process.env.ONLY;
@@ -88,9 +108,9 @@ for (const [w, h] of [
   [6, 11],
   [12, 22],
 ] as const) {
-  for (const [name, defs] of cases) {
+  for (const [name, defs, color] of cases) {
     if (only !== undefined && name !== only) continue;
-    const [med, p95] = measure(defs, w, h);
-    console.log(`cell ${w}x${h}  ${name.padEnd(9)} ${med.toFixed(2).padStart(6)} / ${p95.toFixed(2).padStart(6)}`);
+    const [med, p95] = measure(defs, w, h, color);
+    console.log(`cell ${w}x${h}  ${name.padEnd(19)} ${med.toFixed(2).padStart(6)} / ${p95.toFixed(2).padStart(6)}`);
   }
 }

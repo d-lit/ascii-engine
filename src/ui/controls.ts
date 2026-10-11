@@ -1,3 +1,4 @@
+import type { GradientStop } from '../pipeline/colorize.ts';
 import type { MaskSpec } from '../pipeline/mask.ts';
 import type {
   EnvValue,
@@ -385,6 +386,91 @@ export function maskControl(get: () => MaskSpec | null, set: (m: MaskSpec | null
         break;
     }
     box.replaceChildren(head, body);
+  };
+
+  render();
+  return box;
+}
+
+// ---- colour ----
+
+/** CSS preview of a gradient, left = dark lum, right = bright lum. */
+export function gradientCss(stops: readonly GradientStop[]): string {
+  const sorted = [...stops].sort((a, b) => a.pos - b.pos);
+  if (sorted.length === 1) return sorted[0]!.color;
+  return `linear-gradient(to right, ${sorted.map((s) => `${s.color} ${(s.pos * 100).toFixed(1)}%`).join(', ')})`;
+}
+
+/**
+ * Gradient stop editor. Stops are edited in place; `changed` fires after every
+ * edit so the owner can rebuild its lookup table.
+ */
+export function gradientControl(
+  stops: GradientStop[],
+  palettes: Readonly<Record<string, readonly GradientStop[]>>,
+  maxStops: number,
+  changed: () => void,
+): HTMLElement {
+  const box = document.createElement('div');
+  box.className = 'gradient';
+
+  const render = (): void => {
+    const preview = document.createElement('div');
+    preview.className = 'gradient-preview';
+    preview.style.background = gradientCss(stops);
+
+    const paletteSelect = selectOf(['—', ...Object.keys(palettes)], '—', (name) => {
+      const p = palettes[name];
+      if (p === undefined) return;
+      stops.splice(0, stops.length, ...p.map((s) => ({ ...s })));
+      changed();
+      render();
+    });
+
+    const rows = stops.map((stop, i) => {
+      const color = document.createElement('input');
+      color.type = 'color';
+      color.value = stop.color.length === 4 ? stop.color.replace(/[0-9a-f]/gi, (c) => c + c) : stop.color;
+      color.addEventListener('input', () => {
+        stop.color = color.value;
+        preview.style.background = gradientCss(stops);
+        changed();
+      });
+      const [range, out] = slider(0, 1, 0.01, stop.pos, (n) => {
+        stop.pos = n;
+        preview.style.background = gradientCss(stops);
+        changed();
+      });
+      const remove = button('✕', () => {
+        stops.splice(i, 1);
+        changed();
+        render();
+      }, 'remove stop');
+      remove.disabled = stops.length <= 1;
+      return row(`stop ${i + 1}`, color, range!, out!, remove);
+    });
+
+    const add = button('+ stop', () => {
+      const sorted = [...stops].sort((a, b) => a.pos - b.pos);
+      // New stop in the widest gap, coloured like its left neighbour.
+      let at = 0.5;
+      let base = sorted[0]?.color ?? '#ffffff';
+      let gap = -1;
+      for (let k = 1; k < sorted.length; k++) {
+        const g = sorted[k]!.pos - sorted[k - 1]!.pos;
+        if (g > gap) {
+          gap = g;
+          at = (sorted[k]!.pos + sorted[k - 1]!.pos) / 2;
+          base = sorted[k - 1]!.color;
+        }
+      }
+      stops.push({ pos: Number(at.toFixed(2)), color: base });
+      changed();
+      render();
+    });
+    add.disabled = stops.length >= maxStops;
+
+    box.replaceChildren(preview, row('palette', paletteSelect, add), ...rows);
   };
 
   render();

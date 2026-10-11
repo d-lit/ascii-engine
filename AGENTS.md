@@ -45,7 +45,7 @@ tests/         зеркалит src/
 docs/          SPEC.md, ROADMAP.md, DECISIONS.md, OPEN-QUESTIONS.md, tasks/
 ```
 
-Поток кадра: `source Field → displace → cell → system → post → Renderer`.
+Поток кадра: `source Field → displace → cell → system → post (раскраска + красящие эффекты) → Renderer`.
 
 ## Инварианты (не нарушать без записи в DECISIONS.md)
 

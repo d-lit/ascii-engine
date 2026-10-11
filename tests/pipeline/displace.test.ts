@@ -37,6 +37,7 @@ describe('displace stage', () => {
   it('reproduces the source exactly at zero displacement', () => {
     const src = source();
     const p = new Pipeline(src, meta, createPointer());
+    p.setColor({ mode: 'source', stops: [] }, [0, 0, 0]);
     p.add(shift);
     const work = p.frame(0);
     expect([...work.lum]).toEqual([...src.lum]);

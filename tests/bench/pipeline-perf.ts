@@ -10,6 +10,8 @@ import { decode } from '../../src/effects/cell/decode.ts';
 import { erosion } from '../../src/effects/cell/erosion.ts';
 import { pulse } from '../../src/effects/cell/pulse.ts';
 import { wave } from '../../src/effects/cell/wave.ts';
+import { hueCycle } from '../../src/effects/cell/hue-cycle.ts';
+import { tint } from '../../src/effects/cell/tint.ts';
 import { glitchRows } from '../../src/effects/displace/glitch-rows.ts';
 import { lens } from '../../src/effects/displace/lens.ts';
 import { liquid } from '../../src/effects/displace/liquid.ts';
@@ -86,6 +88,8 @@ const cases: Array<[string, AnyEffectDef[], AddOptions?]> = [
   ['ripple+liquid+wave+erosion', [ripple, liquid, wave, erosion]],
   ['all ten', ALL_TEN],
   ['all ten, mix + radial mask', ALL_TEN, MASKED],
+  ['tint', [tint]],
+  ['hue-cycle', [hueCycle]],
 ];
 
 // ONLY=<case name> runs a single case, e.g. with --trace-gc to count scavenges.

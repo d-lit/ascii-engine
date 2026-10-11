@@ -126,3 +126,55 @@ describe('Compositor', () => {
     expect(pixel(c, 2, 0)).toEqual([...FG, 255]);
   });
 });
+
+describe('Compositor colour path', () => {
+  function colored(lums: number[], inks: number[][], alphas?: number[]): WorkBuffer {
+    const w = work(lums, alphas);
+    w.color = new Uint8ClampedArray(inks.flat());
+    return w;
+  }
+
+  it('draws each cell in its own ink, background where uncovered', () => {
+    const c = setup(2);
+    const w = colored([1, 0.5], [[255, 0, 0], [0, 0, 255]]);
+    c.compose(w, ramp, 'light-on-dark', true, 'nearest-density', fakeMasks());
+    expect(pixel(c, 0, 0)).toEqual([255, 0, 0, 255]);
+    expect(pixel(c, 2, 0)).toEqual([0, 0, 255, 255]); // '.' lit pixel
+    expect(pixel(c, 3, 1)).toEqual([...BG, 255]); // '.' unlit pixel
+  });
+
+  it('blends partial alpha toward the background', () => {
+    const c = setup(1);
+    c.compose(colored([1], [[250, 240, 230]], [0.5]), ramp, 'light-on-dark', true, 'nearest-density', fakeMasks());
+    const [r, g, b] = pixel(c, 0, 0);
+    expect(Math.abs(r! - (BG[0] + 250) / 2)).toBeLessThanOrEqual(1);
+    expect(Math.abs(g! - (BG[1] + 240) / 2)).toBeLessThanOrEqual(1);
+    expect(Math.abs(b! - (BG[2] + 230) / 2)).toBeLessThanOrEqual(1);
+  });
+
+  it('redraws a cell when only its ink changes, skips it otherwise', () => {
+    const c = setup(2);
+    const masks = fakeMasks();
+    const w = colored([1, 1], [[255, 0, 0], [255, 0, 0]]);
+    c.compose(w, ramp, 'light-on-dark', true, 'nearest-density', masks);
+    c.pixels.fill(0);
+    w.color![3] = 0;
+    w.color![4] = 255;
+    c.compose(w, ramp, 'light-on-dark', true, 'nearest-density', masks);
+    expect(pixel(c, 0, 0)).toEqual([0, 0, 0, 0]);
+    expect(pixel(c, 2, 0)).toEqual([0, 255, 0, 255]);
+  });
+
+  it('redraws everything when switching between mono and colour', () => {
+    const c = setup(1);
+    const masks = fakeMasks();
+    const w = work([1]);
+    c.compose(w, ramp, 'light-on-dark', true, 'nearest-density', masks);
+    w.color = new Uint8ClampedArray([0, 255, 0]);
+    c.compose(w, ramp, 'light-on-dark', true, 'nearest-density', masks);
+    expect(pixel(c, 0, 0)).toEqual([0, 255, 0, 255]);
+    w.color = null;
+    c.compose(w, ramp, 'light-on-dark', true, 'nearest-density', masks);
+    expect(pixel(c, 0, 0)).toEqual([...FG, 255]);
+  });
+});

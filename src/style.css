@@ -298,3 +298,19 @@ body {
 #panel .mask {
   margin-bottom: 4px;
 }
+
+#panel .gradient-preview {
+  height: 14px;
+  margin: 2px 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+#panel .gradient .row > input[type='color'] {
+  flex: 0 0 28px;
+  width: 28px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: none;
+}

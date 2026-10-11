@@ -14,10 +14,18 @@ import {
 } from './core/ramp.ts';
 import { registerBuiltinEffects } from './effects/builtin.ts';
 import { getEffect, listEffects } from './effects/registry.ts';
+import {
+  COLOR_MODES,
+  DEFAULT_STOPS,
+  GRADIENT_PALETTES,
+  type ColorSettings,
+} from './pipeline/colorize.ts';
 import { Pipeline } from './pipeline/pipeline.ts';
+import { MAX_STOPS } from './presets/preset.ts';
+import { parseHex } from './core/color.ts';
 import { Canvas2DRenderer } from './render/canvas2d.ts';
 import { exportText } from './render/export-text.ts';
-import { button, checkbox, row, selectOf } from './ui/controls.ts';
+import { button, checkbox, gradientControl, row, selectOf } from './ui/controls.ts';
 import { DebugOverlay } from './ui/debug-overlay.ts';
 import { ChainPanel, type ViewSettings } from './ui/panel.ts';
 
@@ -37,6 +45,7 @@ interface Settings {
   quantizeMode: QuantizeMode;
   useSourceChars: boolean;
   trimRight: boolean;
+  color: ColorSettings;
 }
 
 const settings: Settings = {
@@ -46,6 +55,7 @@ const settings: Settings = {
   quantizeMode: 'nearest-density',
   useSourceChars: true,
   trimRight: true,
+  color: { mode: 'mono', stops: [...DEFAULT_STOPS] },
 };
 
 function el<T extends HTMLElement>(selector: string): T {
@@ -58,13 +68,15 @@ const canvas = el<HTMLCanvasElement>('#view');
 const stage = el<HTMLElement>('#stage');
 const panel = el<HTMLElement>('#panel');
 
+const THEMES = {
+  'light-on-dark': { bg: '#0b0b0d', fg: '#e8e6e3' },
+  'dark-on-light': { bg: '#f4f1ea', fg: '#16151a' },
+} as const;
+
 const renderer = new Canvas2DRenderer(canvas, {
   family: FONT_FAMILY,
   weight: 400,
-  themes: {
-    'light-on-dark': { bg: '#0b0b0d', fg: '#e8e6e3' },
-    'dark-on-light': { bg: '#f4f1ea', fg: '#16151a' },
-  },
+  themes: THEMES,
   useSourceChars: settings.useSourceChars,
   quantizeMode: settings.quantizeMode,
 });
@@ -90,8 +102,8 @@ const input = new PointerInput(canvas, () => ({ cols: field?.cols ?? 1, rows: fi
 // presets can be edited before any picture is loaded.
 registerBuiltinEffects();
 const pipeline = new Pipeline(createField(1, 1), meta, input.pointer);
-const overlay = new DebugOverlay(stage, ['params', 'sample', 'cell', 'render', 'total']);
-const stageMs = new Float64Array(5);
+const overlay = new DebugOverlay(stage, ['params', 'sample', 'cell', 'post', 'render', 'total']);
+const stageMs = new Float64Array(6);
 overlay.visible = false;
 
 // ---- rebuild: file, settings or container size changed ----
@@ -109,6 +121,7 @@ function rebuild(): void {
   if (source === null) return;
 
   meta = { cellAspect: CELL_ASPECT, polarity: settings.polarity };
+  applyColor();
   const { cols, rows } = gridSize(source);
 
   // Cell size depends on the grid; ramp densities depend on the cell size.
@@ -119,7 +132,8 @@ function rebuild(): void {
   let next: Field;
   if (source.kind === 'image') {
     if (imageField === null || imageFieldCols !== settings.cols) {
-      imageField = importImage(source.bitmap, { cols: settings.cols, cellAspect: CELL_ASPECT });
+      // Colour is always imported; the pipeline copies it only when a colour mode needs it.
+      imageField = importImage(source.bitmap, { cols: settings.cols, cellAspect: CELL_ASPECT, color: true });
       imageFieldCols = settings.cols;
     }
     next = imageField;
@@ -157,8 +171,9 @@ function frame(dt: number): void {
   stageMs[0] = tm.params;
   stageMs[1] = tm.sample;
   stageMs[2] = tm.cell;
-  stageMs[3] = renderMs;
-  stageMs[4] = tm.total + renderMs;
+  stageMs[3] = tm.post;
+  stageMs[4] = renderMs;
+  stageMs[5] = tm.total + renderMs;
   overlay.sample(dt, stageMs);
 }
 
@@ -296,12 +311,40 @@ view.append(
   row('time', button('restart', () => pipeline.restart())),
 );
 
+// ---- panel: colour ----
+
+/** Pushes the colour mode and the theme ink to the pipeline (DECISIONS 015). */
+function applyColor(): void {
+  pipeline.setColor(settings.color, parseHex(THEMES[settings.polarity].fg));
+}
+
+const colorBox = section('color');
+const gradientBox = document.createElement('div');
+const colorModeSelect = selectOf(COLOR_MODES, settings.color.mode, (m) => {
+  settings.color.mode = m;
+  renderGradient();
+  applyColor();
+});
+
+function renderGradient(): void {
+  gradientBox.replaceChildren();
+  if (settings.color.mode !== 'gradient') return;
+  gradientBox.append(gradientControl(settings.color.stops, GRADIENT_PALETTES, MAX_STOPS, applyColor));
+}
+
+colorBox.append(row('mode', colorModeSelect), gradientBox);
+renderGradient();
+
 function setView(next: ViewSettings): void {
   settings.ramp = next.ramp;
   settings.polarity = next.polarity;
+  settings.color = next.color;
   rampSelect.value = next.ramp;
   polaritySelect.value = next.polarity;
+  colorModeSelect.value = next.color.mode;
   stage.dataset.polarity = next.polarity;
+  renderGradient();
+  applyColor();
   safeRebuild();
 }
 
@@ -313,7 +356,7 @@ const chainPanel = new ChainPanel(chainRoot, {
   pipeline,
   effects: listEffects(),
   lookup: getEffect,
-  getView: () => ({ ramp: settings.ramp, polarity: settings.polarity }),
+  getView: () => ({ ramp: settings.ramp, polarity: settings.polarity, color: settings.color }),
   setView,
   status: (m) => setStatus(m),
 });

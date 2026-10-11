@@ -1,7 +1,8 @@
 import type { FieldMeta, Polarity, WorkBuffer } from '../core/field.ts';
 import type { FontSpec, QuantizeMode, Ramp } from '../core/ramp.ts';
 import { getAtlas, type GlyphAtlas } from './atlas.ts';
-import { Compositor, type Rgb } from './compositor.ts';
+import { parseHex } from '../core/color.ts';
+import { Compositor } from './compositor.ts';
 import type { Renderer } from './renderer.ts';
 
 /** Hex colours, `#rgb` or `#rrggbb`. */
@@ -10,14 +11,6 @@ export interface ThemeColors {
   fg: string;
 }
 
-export function parseHex(hex: string): Rgb {
-  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex);
-  if (!m) throw new Error(`parseHex: expected #rgb or #rrggbb, got ${hex}`);
-  const h = m[1]!;
-  const full = h.length === 3 ? h.replace(/./g, (c) => c + c) : h;
-  const n = parseInt(full, 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}
 
 export interface Canvas2DOptions {
   family: string;

@@ -13,6 +13,7 @@ import {
   type Preset,
 } from '../../src/presets/preset.ts';
 import { createPointer, Pipeline } from '../../src/pipeline/pipeline.ts';
+import { DEFAULT_STOPS } from '../../src/pipeline/colorize.ts';
 
 registerBuiltinEffects();
 const lookup = getEffect;
@@ -78,7 +79,7 @@ describe('validatePreset', () => {
     expect(preset.name).toBe('Untitled');
     expect(preset.ramp).toBe('classic');
     expect(preset.polarity).toBe('light-on-dark');
-    expect(preset.color.mode).toBe('gradient');
+    expect(preset.color).toEqual({ mode: 'gradient', stops: DEFAULT_STOPS });
     expect(preset.chain).toHaveLength(1);
     expect(preset.chain[0]).toEqual({
       effect: 'wave',
@@ -87,7 +88,7 @@ describe('validatePreset', () => {
       mix: 1,
       mask: null,
     });
-    for (const fragment of ['version', 'ramp', 'polarity', 'not rendered', 'unknown effect', 'not an effect', '"speed"', 'mix', 'mask', 'enabled']) {
+    for (const fragment of ['version', 'ramp', 'polarity', 'unknown effect', 'not an effect', '"speed"', 'mix', 'mask', 'enabled']) {
       expect(warnings.some((w) => w.includes(fragment))).toBe(true);
     }
     expect(warnings.some((w) => w.includes('bogus'))).toBe(false); // unknown params are ignored silently
@@ -104,6 +105,46 @@ describe('validatePreset', () => {
     };
     for (let i = 0; i < 500; i++) expect(() => validatePreset(junk(0), lookup)).not.toThrow();
     expect(parsePreset('{ broken', lookup).warnings[0]).toMatch(/JSON/);
+  });
+});
+
+describe('colour block', () => {
+  const stops = [
+    { pos: 0, color: '#000' },
+    { pos: 1, color: '#ff8800' },
+  ];
+
+  it('keeps valid gradient stops and round-trips them', () => {
+    const { preset, warnings } = validatePreset({ version: 1, color: { mode: 'gradient', stops } }, lookup);
+    expect(warnings).toEqual([]);
+    expect(preset.color).toEqual({ mode: 'gradient', stops });
+    expect(parsePreset(serializePreset(preset), lookup).preset.color).toEqual(preset.color);
+  });
+
+  it('omits stops when the mode does not use them', () => {
+    const { preset } = validatePreset({ color: { mode: 'source', stops } }, lookup);
+    expect(JSON.parse(serializePreset(preset)).color).toEqual({ mode: 'source' });
+  });
+
+  it('falls back to defaults with warnings on bad data', () => {
+    for (const bad of [
+      [],
+      [{ pos: 2, color: '#fff' }],
+      [{ pos: 0, color: 'red' }],
+      Array.from({ length: 9 }, (_, i) => ({ pos: i / 8, color: '#fff' })),
+      'nope',
+    ]) {
+      const { preset, warnings } = validatePreset({ color: { mode: 'gradient', stops: bad } }, lookup);
+      expect(preset.color.stops).toEqual(DEFAULT_STOPS);
+      expect(warnings.some((w) => w.includes('stops'))).toBe(true);
+    }
+    const { preset, warnings } = validatePreset({ color: { mode: 'sepia' } }, lookup);
+    expect(preset.color.mode).toBe('mono');
+    expect(warnings.some((w) => w.includes('color mode'))).toBe(true);
+  });
+
+  it('defaults to mono when the block is missing', () => {
+    expect(validatePreset({}, lookup).preset.color).toEqual({ mode: 'mono', stops: DEFAULT_STOPS });
   });
 });
 

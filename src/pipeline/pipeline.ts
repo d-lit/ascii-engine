@@ -6,6 +6,7 @@ import {
   type FieldMeta,
   type WorkBuffer,
 } from '../core/field.ts';
+import type { Rgb } from '../core/color.ts';
 import { createRand } from '../core/prng.ts';
 import type { Vec2 } from '../core/math.ts';
 import type {
@@ -15,6 +16,12 @@ import type {
   DisplaceFn,
   EffectInstance,
 } from '../effects/types.ts';
+import {
+  buildGradientLut,
+  colorize,
+  DEFAULT_STOPS,
+  type ColorSettings,
+} from './colorize.ts';
 import { createMaskScratch, fillMask, type MaskScratch, type MaskSpec } from './mask.ts';
 import {
   createParamBag,
@@ -64,6 +71,8 @@ export interface StageTimings {
   /** source -> work: plain copy, or displaced bilinear sampling. */
   sample: number;
   cell: number;
+  /** Colour mode plus colour-writing effects. */
+  post: number;
   total: number;
 }
 
@@ -77,7 +86,7 @@ export function createPointer(): Pointer {
  */
 export class Pipeline {
   readonly chain: ChainEntry[] = [];
-  readonly timings: StageTimings = { params: 0, sample: 0, cell: 0, total: 0 };
+  readonly timings: StageTimings = { params: 0, sample: 0, cell: 0, post: 0, total: 0 };
   readonly ctx: FrameContext;
 
   private source: Field;
@@ -93,13 +102,22 @@ export class Pipeline {
   private displaceFns: DisplaceFn[] = [];
   private displaceMix = new Float64Array(0);
   private displaceMasks: Array<Float32Array | null> = [];
+  private postEntries: ChainEntry[] = [];
+  private postFns: CellFn[] = [];
+  private postMix = new Float64Array(0);
+  private postMasks: Array<Float32Array | null> = [];
+
+  private color: ColorSettings = { mode: 'mono', stops: [...DEFAULT_STOPS] };
+  private ink: Rgb = [255, 255, 255];
+  private lut = buildGradientLut(DEFAULT_STOPS);
+  private needColor = false;
   private readonly at: Vec2 = { x: 0, y: 0 };
   private readonly cell: CellRef = { lum: 0, alpha: 0, r: 0, g: 0, b: 0, char: 0 };
 
   constructor(source: Field, meta: FieldMeta, pointer: Pointer, seed = DEFAULT_SEED) {
     this.source = source;
     this.seed = seed;
-    this.work = createWorkBuffer(source.cols, source.rows, { color: source.color !== null });
+    this.work = createWorkBuffer(source.cols, source.rows);
     this.ctx = {
       time: 0,
       dt: 0,
@@ -118,10 +136,8 @@ export class Pipeline {
    * stateful effects (decode, later systems) start over on the new picture.
    */
   setSource(source: Field, meta: FieldMeta): void {
-    const sameSize = source.cols === this.work.cols && source.rows === this.work.rows;
-    const sameColor = (source.color !== null) === (this.work.color !== null);
-    if (!sameSize || !sameColor) {
-      this.work = createWorkBuffer(source.cols, source.rows, { color: source.color !== null });
+    if (source.cols !== this.work.cols || source.rows !== this.work.rows) {
+      this.work = createWorkBuffer(source.cols, source.rows, { color: this.needColor });
     }
     this.source = source;
     const ctx = this.ctx;
@@ -131,6 +147,17 @@ export class Pipeline {
     ctx.cellAspect = meta.cellAspect;
     for (const entry of this.chain) this.allocMask(entry);
     this.restart();
+  }
+
+  /**
+   * Colour mode and theme ink (DECISIONS 015). The gradient lookup table is
+   * rebuilt here, not per frame; call again after editing stops.
+   */
+  setColor(settings: ColorSettings, ink: Rgb): void {
+    this.color = settings;
+    this.ink = ink;
+    buildGradientLut(settings.stops, this.lut);
+    this.rebuild();
   }
 
   /** Back to time 0 with the same seed: recreates instances, resets PRNG. */
@@ -223,20 +250,28 @@ export class Pipeline {
     }
     this.resolveWeights(this.cellEntries, this.cellMix);
     this.resolveWeights(this.displaceEntries, this.displaceMix);
+    this.resolveWeights(this.postEntries, this.postMix);
     const t1 = performance.now();
 
     if (this.displaceFns.length > 0) this.runDisplace();
     else copyFieldToWork(this.source, this.work);
     const t2 = performance.now();
 
-    if (this.cellFns.length > 0) this.runCells();
+    if (this.cellFns.length > 0) this.runCells(this.cellFns, this.cellMix, this.cellMasks);
     const t3 = performance.now();
+
+    if (this.needColor) {
+      colorize(this.work, this.source, this.color.mode, this.ink, this.lut);
+      if (this.postFns.length > 0) this.runCells(this.postFns, this.postMix, this.postMasks);
+    }
+    const t4 = performance.now();
 
     const tm = this.timings;
     tm.params = t1 - t0;
     tm.sample = t2 - t1;
     tm.cell = t3 - t2;
-    tm.total = t3 - t0;
+    tm.post = t4 - t3;
+    tm.total = t4 - t0;
 
     // One-frame pulse: consumed by this frame's effects.
     ctx.pointer.clicked = false;
@@ -278,11 +313,18 @@ export class Pipeline {
     const displaceEntries: ChainEntry[] = [];
     const displaceFns: DisplaceFn[] = [];
     const displaceMasks: Array<Float32Array | null> = [];
+    const postEntries: ChainEntry[] = [];
+    const postFns: CellFn[] = [];
+    const postMasks: Array<Float32Array | null> = [];
     for (const entry of this.chain) {
       if (!entry.enabled) continue;
       const inst = entry.instance;
       const mask = this.state.get(entry)?.maskBuf ?? null;
-      if (inst.kind === 'cell') {
+      if (inst.kind === 'cell' && entry.def.writesColor) {
+        postEntries.push(entry);
+        postFns.push(inst.apply);
+        postMasks.push(mask);
+      } else if (inst.kind === 'cell') {
         cellEntries.push(entry);
         cellFns.push(inst.apply);
         cellMasks.push(mask);
@@ -300,6 +342,17 @@ export class Pipeline {
     this.displaceFns = displaceFns;
     this.displaceMasks = displaceMasks;
     this.displaceMix = new Float64Array(displaceFns.length).fill(1);
+    this.postEntries = postEntries;
+    this.postFns = postFns;
+    this.postMasks = postMasks;
+    this.postMix = new Float64Array(postFns.length).fill(1);
+
+    // Colour channel on demand: a colour mode other than mono, or an effect
+    // that paints. Otherwise the renderer keeps its mono fast path.
+    this.needColor = this.color.mode !== 'mono' || postFns.length > 0;
+    if (this.needColor !== (this.work.color !== null)) {
+      this.work.color = this.needColor ? new Uint8ClampedArray(this.work.cols * this.work.rows * 3) : null;
+    }
   }
 
   /**
@@ -386,8 +439,12 @@ export class Pipeline {
   }
 
   /** One reusable CellRef per frame (SPEC 6.2); `char` maps to charOverride. */
-  private runCells(): void {
-    const { work, cell, cellFns, cellMix, cellMasks, ctx } = this;
+  private runCells(
+    cellFns: readonly CellFn[],
+    cellMix: Float64Array,
+    cellMasks: ReadonlyArray<Float32Array | null>,
+  ): void {
+    const { work, cell, ctx } = this;
     const { lum, alpha, color, charOverride, cols, rows } = work;
     const nFns = cellFns.length;
 
