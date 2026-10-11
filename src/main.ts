@@ -1,12 +1,7 @@
 import './style.css';
-import {
-  copyFieldToWork,
-  createWorkBuffer,
-  type Field,
-  type FieldMeta,
-  type Polarity,
-  type WorkBuffer,
-} from './core/field.ts';
+import type { Field, FieldMeta, Polarity } from './core/field.ts';
+import { createLoop } from './core/loop.ts';
+import { PointerInput } from './core/pointer.ts';
 import { computeRows, importImage } from './core/import-image.ts';
 import { importText, normalizeText } from './core/import-text.ts';
 import {
@@ -14,9 +9,17 @@ import {
   createDensityMeasurer,
   measureRamp,
   type QuantizeMode,
+  type Ramp,
   type RampName,
 } from './core/ramp.ts';
+import { registerBuiltinEffects } from './effects/builtin.ts';
+import { listEffects } from './effects/registry.ts';
+import type { AnyEffectDef } from './effects/types.ts';
+import type { ParamInput } from './pipeline/params.ts';
+import { Pipeline, type ChainEntry } from './pipeline/pipeline.ts';
 import { Canvas2DRenderer } from './render/canvas2d.ts';
+import { buildParamControls } from './ui/controls.ts';
+import { DebugOverlay } from './ui/debug-overlay.ts';
 
 const CELL_ASPECT = 0.55;
 const FONT_FAMILY = "ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
@@ -68,9 +71,22 @@ let source: Source | null = null;
 // Image import is the expensive step; reuse it until the file or cols change.
 let imageField: Field | null = null;
 let imageFieldCols = 0;
-let work: WorkBuffer | null = null;
+// Text luminance depends on ramp and polarity; reuse while those hold.
+let textField: Field | null = null;
+let textFieldRamp: Ramp | null = null;
+let textFieldPolarity: Polarity | null = null;
 
-// ---- pipeline ----
+let field: Field | null = null;
+let ramp: Ramp | null = null;
+let meta: FieldMeta = { cellAspect: CELL_ASPECT, polarity: settings.polarity };
+let pipeline: Pipeline | null = null;
+
+const input = new PointerInput(canvas, () => ({ cols: field?.cols ?? 1, rows: field?.rows ?? 1 }));
+const overlay = new DebugOverlay(stage, ['params', 'copy', 'cell', 'render', 'total']);
+const stageMs = new Float64Array(5);
+overlay.visible = false;
+
+// ---- rebuild: file, settings or container size changed ----
 
 function gridSize(src: Source): { cols: number; rows: number } {
   if (src.kind === 'image') {
@@ -81,45 +97,83 @@ function gridSize(src: Source): { cols: number; rows: number } {
   return { cols: Math.max(1, lines[0]?.length ?? 0), rows: Math.max(1, lines.length) };
 }
 
-function redraw(): void {
+function rebuild(): void {
   if (source === null) return;
-  const t0 = performance.now();
 
-  const meta: FieldMeta = { cellAspect: CELL_ASPECT, polarity: settings.polarity };
+  meta = { cellAspect: CELL_ASPECT, polarity: settings.polarity };
   const { cols, rows } = gridSize(source);
 
   // Cell size depends on the grid; ramp densities depend on the cell size.
   renderer.resize(cols, rows, CELL_ASPECT);
   const font = renderer.font;
-  const ramp = measureRamp(BUILTIN_RAMP_CHARS[settings.ramp], font);
+  ramp = measureRamp(BUILTIN_RAMP_CHARS[settings.ramp], font);
 
-  let field: Field;
+  let next: Field;
   if (source.kind === 'image') {
     if (imageField === null || imageFieldCols !== settings.cols) {
       imageField = importImage(source.bitmap, { cols: settings.cols, cellAspect: CELL_ASPECT });
       imageFieldCols = settings.cols;
     }
-    field = imageField;
+    next = imageField;
   } else {
-    // Text luminance comes from the ramp and polarity, so it is re-imported.
-    field = importText(source.text, ramp, meta, createDensityMeasurer(font)).field;
+    if (textField === null || textFieldRamp !== ramp || textFieldPolarity !== settings.polarity) {
+      textField = importText(source.text, ramp, meta, createDensityMeasurer(font)).field;
+      textFieldRamp = ramp;
+      textFieldPolarity = settings.polarity;
+    }
+    next = textField;
   }
 
-  if (work === null || work.cols !== field.cols || work.rows !== field.rows) {
-    work = createWorkBuffer(field.cols, field.rows);
+  // Effects restart only when the picture itself changes (DECISIONS 012).
+  if (pipeline === null) {
+    pipeline = new Pipeline(next, meta, input.pointer);
+    for (const slot of effectSlots) {
+      slot.entry = pipeline.add(slot.def, slot.values);
+      pipeline.setEnabled(slot.entry, slot.enabled);
+    }
+  } else if (next !== field) {
+    pipeline.setSource(next, meta);
   }
-  copyFieldToWork(field, work);
-  renderer.render(work, ramp, meta);
+  field = next;
 
-  const ms = performance.now() - t0;
-  setStatus(
-    `${source.name} · ${field.cols}×${field.rows} · cell ${font.cellW}×${font.cellH}px · ${ms.toFixed(1)} ms`,
-  );
+  overlay.setInfo(`${next.cols}×${next.rows} · cell ${font.cellW}×${font.cellH}`);
+  setStatus(`${source.name} · ${next.cols}×${next.rows}`);
+  loop.start();
 }
 
-function safeRedraw(): void {
+// ---- frame ----
+
+function frame(dt: number): void {
+  if (pipeline === null || ramp === null) return;
+  input.tick(dt);
+  const work = pipeline.frame(dt);
+
+  const t0 = performance.now();
+  renderer.render(work, ramp, meta);
+  const renderMs = performance.now() - t0;
+
+  const tm = pipeline.timings;
+  stageMs[0] = tm.params;
+  stageMs[1] = tm.copy;
+  stageMs[2] = tm.cell;
+  stageMs[3] = renderMs;
+  stageMs[4] = tm.total + renderMs;
+  overlay.sample(dt, stageMs);
+}
+
+const loop = createLoop((dt) => {
   try {
-    redraw();
+    frame(dt);
+  } catch (err) {
+    loop.stop();
+    console.error(err);
+    setStatus(`error: ${err instanceof Error ? err.message : String(err)}`);
+  }
+});
+
+function safeRebuild(): void {
+  try {
+    rebuild();
   } catch (err) {
     console.error(err);
     setStatus(`error: ${err instanceof Error ? err.message : String(err)}`);
@@ -146,10 +200,12 @@ async function load(file: File): Promise<void> {
     return;
   }
   imageField = null;
+  textField = null;
   stage.classList.add('has-source');
+  overlay.visible = debugToggle.checked;
   colsRow.hidden = source.kind !== 'image';
   sourceCharsRow.hidden = source.kind !== 'text';
-  safeRedraw();
+  safeRebuild();
 }
 
 stage.addEventListener('dragover', (e) => {
@@ -202,7 +258,7 @@ colsValue.textContent = String(settings.cols);
 colsInput.addEventListener('input', () => {
   settings.cols = Number(colsInput.value);
   colsValue.textContent = colsInput.value;
-  safeRedraw();
+  safeRebuild();
 });
 const colsRow = row('cols', colsInput);
 colsRow.append(colsValue);
@@ -211,7 +267,7 @@ row(
   'ramp',
   select(Object.keys(BUILTIN_RAMP_CHARS) as RampName[], settings.ramp, (v) => {
     settings.ramp = v;
-    safeRedraw();
+    safeRebuild();
   }),
 );
 
@@ -220,7 +276,7 @@ row(
   select(['light-on-dark', 'dark-on-light'] as const, settings.polarity, (v) => {
     settings.polarity = v;
     stage.dataset.polarity = v;
-    safeRedraw();
+    safeRebuild();
   }),
 );
 
@@ -228,8 +284,8 @@ row(
   'quantize',
   select(['nearest-density', 'uniform'] as const, settings.quantizeMode, (v) => {
     settings.quantizeMode = v;
+    // Render-only setting: the running loop picks it up next frame.
     renderer.setOptions({ quantizeMode: v });
-    safeRedraw();
   }),
 );
 
@@ -239,10 +295,59 @@ sourceChars.checked = settings.useSourceChars;
 sourceChars.addEventListener('change', () => {
   settings.useSourceChars = sourceChars.checked;
   renderer.setOptions({ useSourceChars: sourceChars.checked });
-  safeRedraw();
 });
 const sourceCharsRow = row('source chars', sourceChars);
 sourceCharsRow.hidden = true;
+
+const debugToggle = document.createElement('input');
+debugToggle.type = 'checkbox';
+debugToggle.checked = true;
+debugToggle.addEventListener('change', () => {
+  overlay.visible = debugToggle.checked && source !== null;
+});
+row('debug', debugToggle);
+
+// ---- effects (temporary list; the chain editor arrives in phase 4) ----
+
+interface EffectSlot {
+  readonly def: AnyEffectDef;
+  readonly values: Record<string, ParamInput>;
+  enabled: boolean;
+  entry: ChainEntry | null;
+}
+
+registerBuiltinEffects();
+const effectSlots: EffectSlot[] = listEffects().map((def) => ({
+  def,
+  values: {},
+  enabled: false,
+  entry: null,
+}));
+
+const effectsTitle = document.createElement('h3');
+effectsTitle.textContent = 'effects';
+panel.append(effectsTitle);
+
+for (const slot of effectSlots) {
+  const toggle = document.createElement('input');
+  toggle.type = 'checkbox';
+  const params = buildParamControls(slot.def.params, slot.values);
+  params.hidden = true;
+  toggle.addEventListener('change', () => {
+    slot.enabled = toggle.checked;
+    params.hidden = !toggle.checked;
+    if (pipeline !== null && slot.entry !== null) pipeline.setEnabled(slot.entry, slot.enabled);
+  });
+  const head = row(slot.def.name, toggle);
+  head.classList.add('effect');
+  panel.append(params);
+}
+
+const restartButton = document.createElement('button');
+restartButton.type = 'button';
+restartButton.textContent = 'restart';
+restartButton.addEventListener('click', () => pipeline?.restart());
+row('time', restartButton);
 
 const status = document.createElement('p');
 status.className = 'status';
@@ -259,6 +364,6 @@ new ResizeObserver(() => {
   pending = true;
   requestAnimationFrame(() => {
     pending = false;
-    safeRedraw();
+    safeRebuild();
   });
 }).observe(stage);

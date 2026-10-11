@@ -1,7 +1,6 @@
-import type { ParamSchema } from '../pipeline/params.ts';
-import type { EffectDef } from './types.ts';
+import type { AnyEffectDef } from './types.ts';
 
-export type AnyEffectDef = EffectDef<ParamSchema>;
+export type { AnyEffectDef };
 
 const defs = new Map<string, AnyEffectDef>();
 

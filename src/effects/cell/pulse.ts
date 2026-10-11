@@ -1,0 +1,44 @@
+import { defineEffect } from '../types.ts';
+
+const TAU = Math.PI * 2;
+
+/**
+ * Brightness or contrast oscillation. `global` pulses the whole picture in
+ * phase; `radial` sends rings out from `center`, optionally fading with
+ * distance (`radius`, 0 = no fade).
+ */
+export const pulse = defineEffect({
+  id: 'pulse',
+  name: 'Pulse',
+  kind: 'cell',
+  params: {
+    shape: { type: 'select', options: ['global', 'radial'], default: 'radial' },
+    target: { type: 'select', options: ['brightness', 'contrast'], default: 'brightness' },
+    center: { type: 'point', default: 'pointer' },
+    frequency: { type: 'number', min: 0.05, max: 5, step: 0.05, default: 1, label: 'frequency, Hz' },
+    amount: { type: 'number', min: 0, max: 1, step: 0.01, default: 0.35 },
+    wavelength: { type: 'number', min: 2, max: 200, step: 1, default: 30, label: 'ring spacing, cells' },
+    radius: { type: 'number', min: 0, max: 200, step: 1, default: 25, label: 'fade radius, cells' },
+  },
+  create(p) {
+    return {
+      kind: 'cell',
+      apply(cell, x, y, ctx) {
+        let phase = p.frequency * ctx.time;
+        let amp = p.amount;
+
+        if (p.shape === 'radial') {
+          const dx = x - p.center.x;
+          const dy = (y - p.center.y) / ctx.cellAspect;
+          const d = Math.sqrt(dx * dx + dy * dy);
+          phase -= d / p.wavelength;
+          if (p.radius > 0) amp *= Math.exp(-d / p.radius);
+        }
+
+        const s = amp * Math.sin(TAU * phase);
+        if (p.target === 'brightness') cell.lum += s;
+        else cell.lum = 0.5 + (cell.lum - 0.5) * (1 + s);
+      },
+    };
+  },
+});

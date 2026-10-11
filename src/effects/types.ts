@@ -1,7 +1,7 @@
 import type { FrameContext } from '../core/context.ts';
 import type { WorkBuffer } from '../core/field.ts';
 import type { Vec2 } from '../core/math.ts';
-import type { ParamSchema, ResolvedParams } from '../pipeline/params.ts';
+import type { ParamBag, ParamSchema, ResolvedParams } from '../pipeline/params.ts';
 
 export type EffectKind = 'displace' | 'cell' | 'system';
 
@@ -37,4 +37,30 @@ export interface EffectDef<P extends ParamSchema> {
   kind: EffectKind;
   params: P;
   create(params: ResolvedParams<P>): EffectInstance;
+}
+
+/** Type-erased descriptor stored in the registry and the chain. */
+export interface AnyEffectDef {
+  readonly id: string;
+  readonly name: string;
+  readonly kind: EffectKind;
+  readonly params: ParamSchema;
+  /** `params` is a live bag the engine re-resolves every frame. */
+  create(params: ParamBag): EffectInstance;
+}
+
+/**
+ * Typed authoring, erased storage. `const P` keeps select options as literal
+ * unions without `as const` at the call site.
+ */
+export function defineEffect<const P extends ParamSchema>(def: EffectDef<P>): AnyEffectDef {
+  return {
+    id: def.id,
+    name: def.name,
+    kind: def.kind,
+    params: def.params,
+    // The engine builds the bag from this very schema (createParamBag), so the
+    // shape matches ResolvedParams<P>; TS cannot see that through the erasure.
+    create: (params) => def.create(params as ResolvedParams<P>),
+  };
 }

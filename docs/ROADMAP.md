@@ -27,13 +27,13 @@
 
 ## Фаза 2 — Цикл и cell-эффекты
 
-- [ ] `core/loop.ts`, `core/context.ts`, ввод курсора в координатах ячеек.
-- [ ] `core/prng.ts` (сидированный), `core/noise.ts` (simplex 2D/3D, fbm).
-- [ ] `effects/types.ts`, `effects/registry.ts` по SPEC §6.
-- [ ] `pipeline/pipeline.ts`: source→work, применение cell-эффектов через один `CellRef`.
-- [ ] Эффекты: `wave`, `erosion`, `decode`, `pulse`.
-- [ ] Debug-оверлей: fps и время по стадиям.
-- [ ] Тесты эффектов на полях 4×4..8×8 с фиксированным временем и сидом.
+- [x] `core/loop.ts`, `core/context.ts`, ввод курсора в координатах ячеек.
+- [x] `core/prng.ts` (сидированный), `core/noise.ts` (simplex 2D/3D, fbm).
+- [x] `effects/types.ts`, `effects/registry.ts` по SPEC §6.
+- [x] `pipeline/pipeline.ts`: source→work, применение cell-эффектов через один `CellRef`.
+- [x] Эффекты: `wave`, `erosion`, `decode`, `pulse`.
+- [x] Debug-оверлей: fps и время по стадиям.
+- [x] Тесты эффектов на полях 4×4..8×8 с фиксированным временем и сидом.
 
 **Готово, когда:** эффекты включаются из `main.ts`, анимация плавная, 200×100 укладывается в бюджет SPEC §12 (цифры в отчёте).
 
