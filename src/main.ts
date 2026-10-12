@@ -37,6 +37,7 @@ import { createFramePainter, type FrameLook } from './export/frame-painter.ts';
 import {
   FRAME_SIZES,
   OFFLINE_FORMATS,
+  probeOfflineAudio,
   probeOfflineFormats,
   renderOffline,
   type FrameSizeName,
@@ -68,6 +69,7 @@ import { button, checkbox, gradientControl, row, selectOf, slider } from './ui/c
 import { CentersOverlay } from './ui/centers-overlay.ts';
 import { createPanelTabs } from './ui/panel-tabs.ts';
 import { TransportBar } from './ui/transport.ts';
+import { AudioPlayer } from './audio/player.ts';
 import { DebugOverlay } from './ui/debug-overlay.ts';
 import { ChainPanel, type ViewSettings } from './ui/panel.ts';
 import { makePanelResizable } from './ui/panel-resize.ts';
@@ -248,12 +250,24 @@ function rebuild(): void {
 // frame of exactly 1/fps, as the offline render does.
 let playing = true;
 let pendingStep = 0;
+// The session's sound track (SPEC 7.2); never in presets.
+const player = new AudioPlayer();
+window.addEventListener('pointerdown', () => player.wake());
+window.addEventListener('keydown', () => player.wake());
+// Frames stop in a hidden tab; so does the sound, it resyncs on return.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) player.halt();
+});
 
 function frame(rawDt: number): void {
   if (source === null || ramp === null) return;
   const live = playing;
-  const dt = live ? rawDt : pendingStep;
+  let dt = live ? rawDt : pendingStep;
   pendingStep = 0;
+  player.sync(live, pipeline.ctx.time);
+  const heard = live ? player.clockNow() : -1;
+  // With a track playing the picture follows what is heard (SPEC 10.1).
+  if (heard >= 0) dt = Math.min(Math.max(heard - pipeline.ctx.time, 0), MAX_DT);
   transport.update(playing, recorder.recording, pipeline.ctx.time);
   if (live) input.tick(dt);
   if (live && recorder.recording) {
@@ -699,6 +713,82 @@ backdropColorInput.addEventListener('input', () => {
   applyBackdrop();
 });
 backgroundBox.append(row('mode', backdropSelect), backdropColorRow, imageBox, backdropFile);
+
+// ---- panel: audio (SPEC 7.2) ----
+
+const audioBox = section('audio', 'source');
+const audioFile = document.createElement('input');
+audioFile.type = 'file';
+audioFile.accept = 'audio/*';
+audioFile.hidden = true;
+const audioControls = document.createElement('div');
+
+function audioChanged(): void {
+  renderAudioControls();
+  panel.dispatchEvent(new Event('audiochange'));
+}
+
+audioFile.addEventListener('change', () => {
+  const file = audioFile.files?.[0];
+  audioFile.value = '';
+  if (!file) return;
+  setStatus(`decoding ${file.name}…`);
+  player.load(file).then(
+    () => {
+      setStatus(`audio: ${file.name} · ${player.span.toFixed(1)} s`);
+      audioChanged();
+    },
+    (err: unknown) => {
+      console.error(err);
+      setStatus(`cannot decode ${file.name}`);
+    },
+  );
+});
+
+function renderAudioControls(): void {
+  const buffer = player.buffer;
+  const name = document.createElement('span');
+  name.className = 'audio-name';
+  name.textContent = buffer === null ? 'none' : player.name;
+  name.title = name.textContent;
+  const head = row('track', button('load…', () => audioFile.click(), 'audio file: mp3, wav, m4a, ogg…'), name);
+  if (buffer !== null) {
+    head.append(button('✕', () => {
+      player.clear();
+      audioChanged();
+      setStatus('audio removed');
+    }, 'remove the track'));
+  }
+  audioControls.replaceChildren(head);
+  if (buffer === null) {
+    audioControls.append(hint('Plays with the transport and goes into recordings and renders. Not saved in presets.'));
+    return;
+  }
+  const length = hint('');
+  const showLength = (): void => {
+    length.textContent = `${buffer.duration.toFixed(1)} s total · from start: ${player.span.toFixed(1)} s`;
+  };
+  showLength();
+  audioControls.append(
+    row('start, s', ...slider(0, Math.max(0, Math.floor(buffer.duration * 10) / 10), 0.1, player.offset, (n) => {
+      player.offset = n;
+      player.invalidate();
+      showLength();
+      panel.dispatchEvent(new Event('audiochange'));
+    })),
+    row('loop', checkbox(player.loop, (on) => {
+      player.loop = on;
+      player.invalidate();
+    })),
+    row('mute', checkbox(player.muted, (on) => {
+      player.muted = on;
+    })),
+    length,
+  );
+}
+
+audioBox.append(audioControls, audioFile);
+renderAudioControls();
 applyBackdrop();
 
 function setView(next: ViewSettings): void {
@@ -859,8 +949,8 @@ exportBox.append(
 
 const VIDEO_FPS = ['60', '30'] as const;
 const VIDEO_QUALITY: readonly VideoQuality[] = ['high', 'medium', 'low'];
-const VIDEO_LENGTH = ['manual', '5 s', '10 s', '15 s', '30 s'] as const;
-const RENDER_LENGTH = ['take', '5 s', '10 s', '15 s', '30 s'] as const;
+const VIDEO_LENGTH = ['manual', 'audio', '5 s', '10 s', '15 s', '30 s'] as const;
+const RENDER_LENGTH = ['take', 'audio', '5 s', '10 s', '15 s', '30 s'] as const;
 /** Render length when there is no take to measure. */
 const RENDER_FALLBACK_SECONDS = 10;
 
@@ -870,6 +960,8 @@ const video = {
   fps: 60,
   quality: 'high' as VideoQuality,
   seconds: 0,
+  // `length: audio`: stop when one pass of the track is over.
+  toAudio: false,
   fromStart: true,
 };
 const recorder = new CanvasRecorder();
@@ -898,9 +990,14 @@ const recordAlphaHint = hint(
 /** Marks formats that lose a transparent background (DECISIONS 020). */
 function labelRecordFormats(): void {
   const transparent = settings.backdrop.kind === 'transparent';
+  const sound = player.buffer !== null;
   formats.forEach((f, i) => {
     const option = formatSelect.options[i];
-    if (option !== undefined) option.textContent = transparent && f.ext === 'mp4' ? `${f.label} — no transparency` : f.label;
+    if (option === undefined) return;
+    const notes: string[] = [];
+    if (transparent && f.ext === 'mp4') notes.push('no transparency');
+    if (sound && f.audioMimeType == null) notes.push('no audio');
+    option.textContent = notes.length === 0 ? f.label : `${f.label} — ${notes.join(', ')}`;
   });
   recordAlphaHint.hidden = !transparent;
 }
@@ -938,10 +1035,15 @@ async function toggleRecording(): Promise<void> {
     format,
     fps: video.fps,
     bitsPerSecond: bitrateFor(target.width, target.height, video.fps, video.quality),
+    audio: player.recordTrack(),
   });
+  recordingAudio = player.buffer !== null && format.audioMimeType != null;
   stage.classList.add('recording');
   tickRecording();
 }
+
+// Whether the running take has sound, for the status line.
+let recordingAudio = false;
 
 async function finishRecording(): Promise<void> {
   const format = formats[video.format];
@@ -959,7 +1061,8 @@ async function finishRecording(): Promise<void> {
     link.click();
     // Revoke later: the download may still be reading the blob.
     setTimeout(() => URL.revokeObjectURL(url), 10_000);
-    setStatus(`saved ${name} · ${(blob.size / 1e6).toFixed(1)} MB`);
+    const sound = player.buffer === null ? '' : recordingAudio ? ' · with audio' : ' · no audio: this format cannot record it here';
+    setStatus(`saved ${name} · ${(blob.size / 1e6).toFixed(1)} MB${sound}`);
   } catch (err) {
     console.error(err);
     setStatus(`recording failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -970,7 +1073,8 @@ async function finishRecording(): Promise<void> {
 function tickRecording(): void {
   if (!recorder.recording) return;
   const t = recorder.elapsed;
-  if (video.seconds > 0 && t >= video.seconds) {
+  const limit = video.toAudio ? player.span : video.seconds;
+  if (limit > 0 && t >= limit) {
     void finishRecording();
     return;
   }
@@ -1014,7 +1118,8 @@ if (formats.length === 0) {
     row('format', formatSelect),
     recordAlphaHint,
     row('length', selectOf(VIDEO_LENGTH, 'manual', (v) => {
-      video.seconds = v === 'manual' ? 0 : parseInt(v, 10);
+      video.toAudio = v === 'audio';
+      video.seconds = v === 'manual' || v === 'audio' ? 0 : parseInt(v, 10);
     })),
     row('from start', checkbox(video.fromStart, (on) => {
       video.fromStart = on;
@@ -1035,6 +1140,8 @@ offlineFormatSelect.addEventListener('change', () => {
   offline.format = Number(offlineFormatSelect.value);
 });
 let probeId = 0;
+// Sound support per offline format; does not depend on the frame, probed once.
+let audioSupport: boolean[] | null = null;
 
 function offlineSize(): [number, number] {
   // A fixed canvas is the frame; `auto` picks from the list.
@@ -1049,6 +1156,7 @@ async function refreshOfflineFormats(): Promise<void> {
   const id = ++probeId;
   const [w, h] = offlineSize();
   const support = await probeOfflineFormats(w, h, bitrateFor(w, h, video.fps, video.quality), video.fps);
+  audioSupport ??= await probeOfflineAudio();
   if (id !== probeId) return; // a newer probe superseded this one
   const why: string[] = [];
   OFFLINE_FORMATS.forEach((f, i) => {
@@ -1056,12 +1164,17 @@ async function refreshOfflineFormats(): Promise<void> {
     if (option === undefined) return;
     const s = support[i];
     option.disabled = s !== 'ok';
-    const lossy = settings.backdrop.kind === 'transparent' && !f.alpha;
-    option.textContent =
-      s === 'none' ? `${f.label} — not in this browser`
-      : s === 'size' ? `${f.label} — too large here`
-      : lossy ? `${f.label} — no transparency`
-      : f.label;
+    const notes: string[] = [];
+    if (s === 'none') notes.push('not in this browser');
+    else if (s === 'size') notes.push('too large here');
+    else {
+      if (settings.backdrop.kind === 'transparent' && !f.alpha) notes.push('no transparency');
+      if (player.buffer !== null && audioSupport?.[i] !== true) notes.push('no audio');
+    }
+    option.textContent = notes.length === 0 ? f.label : `${f.label} — ${notes.join(', ')}`;
+    if (s === 'ok' && player.buffer !== null && audioSupport?.[i] !== true) {
+      why.push(`${f.label}: this browser cannot encode its sound (${f.audioCodec === 'aac' ? 'AAC' : 'Opus'}); the video will be silent.`);
+    }
     if (s === 'none') why.push(`${f.label}: this browser has no encoder for it.`);
     if (s === 'size') {
       why.push(`${f.label}: cannot encode ${w}×${h} at ${video.fps} fps, ${video.quality} quality — try a smaller size, 30 fps or lower quality.`);
@@ -1084,6 +1197,7 @@ formatHint.hidden = true;
 /** Render length in seconds and where it comes from. */
 function renderSeconds(): { seconds: number; replay: boolean } {
   const replay = offline.replay && takeTrack.length > 1;
+  if (offline.length === 'audio') return { seconds: player.span > 0 ? player.span : RENDER_FALLBACK_SECONDS, replay };
   if (offline.length !== 'take') return { seconds: parseInt(offline.length, 10), replay };
   return { seconds: takeTrack.length > 1 ? takeTrack.duration : RENDER_FALLBACK_SECONDS, replay };
 }
@@ -1092,8 +1206,9 @@ const lengthHint = hint('');
 /** Shows what `take` means right now. */
 function refreshLengthHint(): void {
   const take = takeTrack.length > 1 ? `last take: ${takeTrack.duration.toFixed(1)} s` : 'no take recorded yet';
+  const audio = player.span > 0 ? ` · audio: ${player.span.toFixed(1)} s` : offline.length === 'audio' ? ' · no audio loaded' : '';
   const { seconds } = renderSeconds();
-  lengthHint.textContent = `${take} · render: ${seconds.toFixed(1)} s`;
+  lengthHint.textContent = `${take}${audio} · render: ${seconds.toFixed(1)} s`;
 }
 
 // Size list only for an `auto` canvas; a fixed canvas is the frame.
@@ -1121,6 +1236,9 @@ async function toggleRender(): Promise<void> {
   const format = OFFLINE_FORMATS[offline.format];
   if (format === undefined) return;
   const { seconds, replay } = renderSeconds();
+  const audioBuffer = player.buffer;
+  const audioTiming = player.timing;
+  const withAudio = audioBuffer !== null && audioTiming !== null && audioSupport?.[offline.format] === true;
 
   rendering = new AbortController();
   renderButton.textContent = 'cancel · 0%';
@@ -1138,6 +1256,7 @@ async function toggleRender(): Promise<void> {
         bitsPerSecond: bitrateFor(width, height, video.fps, video.quality),
         format,
         track: replay ? takeTrack : null,
+        audio: withAudio ? { buffer: audioBuffer, timing: audioTiming } : null,
       },
       (done, total) => {
         renderButton.textContent = `cancel · ${Math.floor((done / total) * 100)}%`;
@@ -1151,7 +1270,8 @@ async function toggleRender(): Promise<void> {
     link.download = name;
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 10_000);
-    setStatus(`rendered ${name} · ${width}×${height} · ${seconds.toFixed(1)} s · ${(blob.size / 1e6).toFixed(1)} MB`);
+    const sound = audioBuffer === null ? '' : withAudio ? ' · with audio' : ' · no audio: this format cannot encode it here';
+    setStatus(`rendered ${name} · ${width}×${height} · ${seconds.toFixed(1)} s · ${(blob.size / 1e6).toFixed(1)} MB${sound}`);
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') setStatus('render cancelled');
     else {
@@ -1187,6 +1307,11 @@ if (typeof VideoEncoder === 'undefined') {
 panel.addEventListener('backdropchange', () => {
   labelRecordFormats();
   void refreshOfflineFormats();
+});
+panel.addEventListener('audiochange', () => {
+  labelRecordFormats();
+  void refreshOfflineFormats();
+  refreshLengthHint();
 });
 labelRecordFormats();
 

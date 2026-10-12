@@ -2,6 +2,16 @@ export interface VideoFormat {
   readonly mimeType: string;
   readonly ext: 'mp4' | 'webm';
   readonly label: string;
+  /** Same format with a sound track; null when this browser cannot record it with audio. */
+  readonly audioMimeType?: string | null;
+}
+
+/** Audio codecs to try per container, preferred first (AAC is what social media expects in MP4). */
+const AUDIO_CODECS = { mp4: ['mp4a.40.2', 'opus'], webm: ['opus'] } as const;
+
+/** `video/mp4;codecs=avc1` + `opus` -> `video/mp4;codecs=avc1,opus`; a bare type keeps the browser's default. */
+export function withAudioCodec(mimeType: string, audio: string): string {
+  return mimeType.includes('codecs=') ? `${mimeType},${audio}` : mimeType;
 }
 
 /**
@@ -22,7 +32,9 @@ export function supportedFormats(isSupported: (mime: string) => boolean): VideoF
   const out: VideoFormat[] = [];
   for (const f of FORMAT_CANDIDATES) {
     if (out.some((o) => o.ext === f.ext)) continue;
-    if (isSupported(f.mimeType)) out.push(f);
+    if (!isSupported(f.mimeType)) continue;
+    const audio = AUDIO_CODECS[f.ext].map((a) => withAudioCodec(f.mimeType, a)).find((m) => isSupported(m));
+    out.push({ ...f, audioMimeType: audio ?? null });
   }
   return out;
 }
@@ -49,6 +61,8 @@ export interface RecorderOptions {
   format: VideoFormat;
   fps: number;
   bitsPerSecond: number;
+  /** Sound to record along; needs `format.audioMimeType`. */
+  audio?: MediaStreamTrack | null;
 }
 
 /**
@@ -78,8 +92,12 @@ export class CanvasRecorder {
   start(canvas: HTMLCanvasElement, opts: RecorderOptions): void {
     if (this.recorder !== null) throw new Error('CanvasRecorder: already recording');
     const stream = canvas.captureStream(opts.fps);
+    const audio = opts.audio ?? null;
+    const audioMime = opts.format.audioMimeType ?? null;
+    const withAudio = audio !== null && audioMime !== null;
+    if (withAudio) stream.addTrack(audio);
     const recorder = new MediaRecorder(stream, {
-      mimeType: opts.format.mimeType,
+      mimeType: withAudio ? audioMime : opts.format.mimeType,
       videoBitsPerSecond: opts.bitsPerSecond,
     });
     this.chunks = [];
@@ -119,7 +137,8 @@ export class CanvasRecorder {
     this.recorder = null;
     return new Promise((resolve, reject) => {
       recorder.addEventListener('stop', () => {
-        for (const track of recorder.stream.getTracks()) track.stop();
+        // The audio track belongs to the player and lives on.
+        for (const track of recorder.stream.getVideoTracks()) track.stop();
         resolve(new Blob(this.chunks, { type: recorder.mimeType }));
       });
       recorder.addEventListener('error', () => reject(new Error('MediaRecorder failed')));

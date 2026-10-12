@@ -37,6 +37,7 @@ src/
     cell/      по файлу на эффект
     displace/  по файлу на эффект
     system/    по файлу на эффект
+  audio/       track.ts (позиция трека), player.ts (Web Audio), slice.ts
   pipeline/    pipeline.ts, params.ts (LFO/огибающие), mask.ts
   presets/     preset.ts (типы, валидация), *.json
   render/      renderer.ts (интерфейс), atlas.ts, canvas2d.ts, block-glyphs.ts

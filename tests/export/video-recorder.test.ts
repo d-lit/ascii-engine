@@ -7,6 +7,15 @@ describe('supportedFormats', () => {
     expect(supportedFormats(chrome).map((f) => f.mimeType)).toEqual(['video/mp4;codecs=avc1', 'video/webm;codecs=vp9']);
   });
 
+  it('finds the audio variant: AAC first in MP4, Opus in WebM, none when missing', () => {
+    const noAac = (m: string) => !m.includes('mp4a') && m !== 'video/webm;codecs=vp9,opus';
+    const [mp4, webm] = supportedFormats(noAac);
+    expect(mp4?.audioMimeType).toBe('video/mp4;codecs=avc1.640033,opus');
+    expect(webm?.audioMimeType).toBeNull();
+    const [all] = supportedFormats(() => true);
+    expect(all?.audioMimeType).toBe('video/mp4;codecs=avc1.640033,mp4a.40.2');
+  });
+
   it('falls back to WebM only, or nothing', () => {
     expect(supportedFormats((m) => m.startsWith('video/webm')).map((f) => f.ext)).toEqual(['webm']);
     expect(supportedFormats(() => false)).toEqual([]);

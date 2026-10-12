@@ -6,6 +6,8 @@ import { createPointer, Pipeline } from '../pipeline/pipeline.ts';
 import { layoutFrame, type FrameLayout } from '../render/canvas2d.ts';
 import { createFramePainter, type FrameLook } from './frame-painter.ts';
 import type { PointerTrack } from './pointer-track.ts';
+import { EXPORT_SAMPLE_RATE, renderTrackSlice } from '../audio/slice.ts';
+import type { TrackTiming } from '../audio/track.ts';
 
 /** Output frame sizes; `screen` keeps the on-screen canvas size. */
 export const FRAME_SIZES = {
@@ -20,6 +22,8 @@ export type FrameSizeName = keyof typeof FRAME_SIZES;
 export interface OfflineFormat {
   readonly ext: 'mp4' | 'webm';
   readonly codec: 'avc' | 'vp9';
+  /** Sound codec of this container: AAC in MP4, Opus in WebM. */
+  readonly audioCodec: 'aac' | 'opus';
   readonly label: string;
   /** Keeps a transparent backdrop transparent (VP9 alpha in WebM). */
   readonly alpha: boolean;
@@ -27,8 +31,8 @@ export interface OfflineFormat {
 
 /** MP4 first: the format social media accepts everywhere. */
 export const OFFLINE_FORMATS: readonly OfflineFormat[] = [
-  { ext: 'mp4', codec: 'avc', label: 'MP4 · H.264', alpha: false },
-  { ext: 'webm', codec: 'vp9', label: 'WebM · VP9', alpha: true },
+  { ext: 'mp4', codec: 'avc', audioCodec: 'aac', label: 'MP4 · H.264', alpha: false },
+  { ext: 'webm', codec: 'vp9', audioCodec: 'opus', label: 'WebM · VP9', alpha: true },
 ];
 
 /**
@@ -62,6 +66,20 @@ export async function probeOfflineFormats(
 
 export { layoutFrame, type FrameLayout };
 
+/** Bitrate of exported sound. */
+export const AUDIO_BITS_PER_SECOND = 192_000;
+
+/** Whether each offline format can carry sound in this browser (no substitution: SPEC 12.1). */
+export async function probeOfflineAudio(): Promise<boolean[]> {
+  const mb = await import('./mux.ts');
+  const quality = new mb.Quality(AUDIO_BITS_PER_SECOND);
+  return Promise.all(
+    OFFLINE_FORMATS.map((f) =>
+      mb.canEncodeAudio(f.audioCodec, { numberOfChannels: 2, sampleRate: EXPORT_SAMPLE_RATE, quality }),
+    ),
+  );
+}
+
 /** The look of the frame (`cols`/`rows`/`cellAspect`/`polarity` come from the source). */
 export interface OfflineJob extends Omit<FrameLook, 'cols' | 'rows' | 'cellAspect' | 'polarity'> {
   source: Field;
@@ -75,6 +93,8 @@ export interface OfflineJob extends Omit<FrameLook, 'cols' | 'rows' | 'cellAspec
   format: OfflineFormat;
   /** Pointer path to replay; null = no pointer (outside the picture). */
   track: PointerTrack | null;
+  /** Sound to put under the video, from the transport's zero; null = silent. */
+  audio: { buffer: AudioBuffer; timing: TrackTiming } | null;
 }
 
 export interface OfflineResult {
@@ -129,7 +149,18 @@ export async function renderOffline(job: OfflineJob, onProgress: ProgressFn, sig
   const keepAlpha = job.backdrop.kind === 'transparent' && job.format.alpha;
   const videoSource = new mb.CanvasSource(canvas, { codec, quality, alpha: keepAlpha ? 'keep' : 'discard' });
   output.addVideoTrack(videoSource, { frameRate: fps });
+  let audioSource: InstanceType<typeof mb.AudioBufferSource> | null = null;
+  let audioSlice: AudioBuffer | null = null;
+  if (job.audio !== null) {
+    audioSlice = await renderTrackSlice(job.audio.buffer, job.audio.timing, job.seconds);
+    audioSource = new mb.AudioBufferSource({ codec: job.format.audioCodec, quality: new mb.Quality(AUDIO_BITS_PER_SECOND) });
+    output.addAudioTrack(audioSource);
+  }
   await output.start();
+  // Sound goes in alongside the frames; awaited at the end (the muxer
+  // interleaves, so waiting for it first could stall on the video track).
+  const audioDone = audioSource !== null && audioSlice !== null ? audioSource.add(audioSlice) : Promise.resolve();
+  audioDone.catch(() => undefined);
 
   const step = 1 / fps;
   const total = Math.max(1, Math.round(job.seconds * fps));
@@ -142,6 +173,8 @@ export async function renderOffline(job: OfflineJob, onProgress: ProgressFn, sig
       await videoSource.add(i * step, step);
       onProgress(i + 1, total);
     }
+    await audioDone;
+    audioSource?.close();
     await output.finalize();
   } catch (err) {
     await output.cancel();

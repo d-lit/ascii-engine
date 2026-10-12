@@ -528,3 +528,13 @@ body {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
+
+/* Audio track name: one line, ellipsis. */
+#panel .audio-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
