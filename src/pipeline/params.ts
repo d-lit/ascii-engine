@@ -50,6 +50,8 @@ export interface EnvValue {
   env: Array<[t: number, v: number]>;
   loop?: boolean;
   ease?: 'linear' | 'smooth';
+  /** `beat`: the envelope starts over on every beat of the track (SPEC 7.2). */
+  on?: 'beat';
 }
 
 /** A modulated number: any object form resolved by a registered ModSource. */

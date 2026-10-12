@@ -1,6 +1,6 @@
 import { smoothstep } from '../core/math.ts';
 import { HASH_UNIT, hashInt2 } from '../core/prng.ts';
-import { AUDIO_BANDS, sampleBand, type BandTable } from '../audio/bands.ts';
+import { AUDIO_BANDS, lastOnset, sampleBand, type BandTable } from '../audio/bands.ts';
 import { trackPosition, type TrackTiming } from '../audio/track.ts';
 import type { AudioValue, EnvValue, LfoShape, LfoValue } from './params.ts';
 
@@ -124,7 +124,22 @@ function isEnv(v: object): v is EnvValue {
     if (!Array.isArray(p) || !finite(p[0]) || !finite(p[1]) || p[0] < prev) return false;
     prev = p[0];
   }
-  return o.ease === undefined || o.ease === 'linear' || o.ease === 'smooth';
+  return (o.ease === undefined || o.ease === 'linear' || o.ease === 'smooth') && (o.on === undefined || o.on === 'beat');
+}
+
+/**
+ * Seconds since the last beat heard at transport time `time`, or -1 when
+ * there is no track or no beat yet. Stateless: from the onset table.
+ */
+function sinceBeat(e: ModEnv): number {
+  const feed = e.audio;
+  if (feed === null) return -1;
+  const pos = trackPosition(e.time, feed.timing);
+  if (pos === null) return -1;
+  const i = lastOnset(feed.bands, pos);
+  // A beat before the stretch the transport plays (offset) is not heard.
+  if (i < 0 || feed.bands.onsets[i]! < feed.timing.offset - 1e-9) return -1;
+  return pos - feed.bands.onsets[i]!;
 }
 
 /** Value of breakpoints at time `t`; holds the ends, optionally loops. */
@@ -154,8 +169,12 @@ export function envAt(env: EnvValue, t: number): number {
 
 export const envSource: ModSource = {
   key: 'env',
-  resolve(value, t) {
-    return isEnv(value) ? envAt(value, t) : undefined;
+  resolve(value, t, e) {
+    if (!isEnv(value)) return undefined;
+    if (value.on !== 'beat') return envAt(value, t);
+    // On beat: restart at every beat; before the first one, rest at the end.
+    const since = sinceBeat(e);
+    return since < 0 ? value.env[value.env.length - 1]![1] : envAt(value, since);
   },
 };
 

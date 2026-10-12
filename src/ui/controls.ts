@@ -237,6 +237,10 @@ export function numberControl(
         row('ease', selectOf(['linear', 'smooth'] as const, env.ease ?? 'linear', (e) => {
           env.ease = e;
         })),
+        row('on beat', checkbox(env.on === 'beat', (b) => {
+          if (b) env.on = 'beat';
+          else delete env.on;
+        })),
       );
     }
     box.replaceChildren(head, body);

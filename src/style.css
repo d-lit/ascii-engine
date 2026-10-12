@@ -538,3 +538,8 @@ body {
   white-space: nowrap;
   color: var(--muted);
 }
+
+.transport input[type='range'] {
+  width: clamp(80px, 22vw, 260px);
+  accent-color: var(--accent);
+}

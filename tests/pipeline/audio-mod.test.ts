@@ -96,3 +96,54 @@ describe('audio modulation', () => {
     expect(off.seen[off.seen.length - 1]).toBe(1);
   });
 });
+
+describe('beats', () => {
+  const RATE2 = 22050;
+  // Kicks at 0, 1, 2, 3 s.
+  const s = new Float32Array(RATE2 * 4);
+  for (let i = 0; i < s.length; i++) {
+    const t = i / RATE2;
+    s[i] = 0.6 * Math.exp(-(t % 1) / 0.08) * Math.sin(2 * Math.PI * 70 * t);
+  }
+  const bands = analyseBands(s, RATE2);
+  const feed = { bands, timing: { duration: 4, offset: 0, loop: false } };
+
+  it('pulses ctx.beat once per beat, in the frame that hears it', () => {
+    const { p } = probePipeline(0);
+    p.setAudio(feed);
+    const hits: number[] = [];
+    p.frame(0);
+    for (let i = 1; i <= 160; i++) {
+      p.frame(1 / 40);
+      if (p.ctx.beat > 0) hits.push(Number(p.ctx.time.toFixed(3)));
+    }
+    expect(hits.length).toBe(4);
+    hits.forEach((h, k) => expect(Math.abs(h - k)).toBeLessThan(0.08));
+  });
+
+  it('restarts an envelope on every beat', () => {
+    const value = { env: [[0, 10], [0.5, 0]], on: 'beat' };
+    const { p, seen } = probePipeline(value);
+    p.setAudio(feed);
+    p.frame(0);
+    for (let i = 0; i < 44; i++) p.frame(1 / 40); // t = 1.1: 0.1 s after a beat
+    expect(seen[seen.length - 1]).toBeGreaterThan(6);
+    for (let i = 0; i < 16; i++) p.frame(1 / 40); // t = 1.5: 0.5 s after
+    expect(seen[seen.length - 1]).toBeLessThan(1);
+  });
+
+  it('rests at the last point without a track', () => {
+    expect(resolveMod({ env: [[0, 10], [0.5, 2]], on: 'beat' }, 0.1)).toBe(2);
+  });
+});
+
+describe('restartAt', () => {
+  it('puts every effect clock at the given time without running frames', () => {
+    const value = { lfo: 'saw', freq: 0.1, min: 0, max: 10 };
+    const { p, seen } = probePipeline(value);
+    p.restartAt(4);
+    p.frame(0);
+    expect(p.ctx.time).toBe(4);
+    expect(seen[seen.length - 1]).toBeCloseTo(4, 6);
+  });
+});

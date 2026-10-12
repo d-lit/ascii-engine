@@ -27,7 +27,20 @@ export interface BandTable {
   readonly length: number;
   readonly bands: Readonly<Record<AudioBand, Float32Array>>;
   readonly sums: Readonly<Record<AudioBand, Float64Array>>;
+  /** Beats (onsets): times in seconds, ascending, and strengths 0..1. */
+  readonly onsets: Float64Array;
+  readonly strengths: Float32Array;
 }
+
+// Onsets: rise of band loudness over this many entries, weighted by band.
+const ONSET_LAG = 2;
+const ONSET_WEIGHTS = { bass: 1, mid: 0.6, high: 0.4 } as const;
+// Adaptive threshold: local mean over +-HALF entries plus a margin.
+const ONSET_HALF = 25;
+const ONSET_MARGIN = 0.08;
+// Peak must be the largest within +-PEAK entries; beats at least GAP apart.
+const ONSET_PEAK = 5;
+const ONSET_GAP = 0.12;
 
 /** Channels averaged into one. */
 export function mixToMono(channels: readonly Float32Array[]): Float32Array {
@@ -95,7 +108,9 @@ export function createBandAnalysis(samples: Float32Array, sampleRate: number) {
       bands[band] = normalise(db[band]);
       sums[band] = prefixSums(bands[band]);
     }
-    return { hop: hopSamples / sampleRate, length, bands, sums };
+    const hop = hopSamples / sampleRate;
+    const { onsets, strengths } = findOnsets(bands, length, hop);
+    return { hop, length, bands, sums, onsets, strengths };
   };
 
   return { step, table };
@@ -106,6 +121,83 @@ export function analyseBands(samples: Float32Array, sampleRate: number): BandTab
   const a = createBandAnalysis(samples, sampleRate);
   while (!a.step(4096));
   return a.table();
+}
+
+/**
+ * Beats from the weighted rise of band loudness (spectral flux on the
+ * band table): local peaks above a moving threshold, at least ONSET_GAP
+ * apart. Strength = how far the peak clears the threshold, normalised.
+ */
+export function findOnsets(
+  bands: Readonly<Record<AudioBand, Float32Array>>,
+  length: number,
+  hop: number,
+): { onsets: Float64Array; strengths: Float32Array } {
+  const flux = new Float32Array(length);
+  for (let i = ONSET_LAG; i < length; i++) {
+    let f = 0;
+    for (const band of ['bass', 'mid', 'high'] as const) {
+      const v = bands[band];
+      f += ONSET_WEIGHTS[band] * Math.max(0, v[i]! - v[i - ONSET_LAG]!);
+    }
+    flux[i] = f;
+  }
+  const sums = prefixSums(flux);
+  const times: number[] = [];
+  const heights: number[] = [];
+  let last = -Infinity;
+  for (let i = 1; i < length; i++) {
+    const f = flux[i]!;
+    const lo = Math.max(0, i - ONSET_HALF);
+    const hi = Math.min(length, i + ONSET_HALF + 1);
+    const threshold = (sums[hi]! - sums[lo]!) / (hi - lo) + ONSET_MARGIN;
+    if (f <= threshold) continue;
+    let peak = true;
+    for (let j = Math.max(0, i - ONSET_PEAK); j <= Math.min(length - 1, i + ONSET_PEAK); j++) {
+      if (flux[j]! > f || (flux[j] === f && j < i)) {
+        peak = false;
+        break;
+      }
+    }
+    // The rise is measured over ONSET_LAG entries: the beat began at its start.
+    const t = (i - ONSET_LAG) * hop;
+    if (!peak || t - last < ONSET_GAP) continue;
+    times.push(t);
+    heights.push(f - threshold);
+    last = t;
+  }
+  const sorted = Float32Array.from(heights).sort();
+  const top = Math.max(1e-6, percentile(sorted, 0.9));
+  return {
+    onsets: Float64Array.from(times),
+    strengths: Float32Array.from(heights, (h) => Math.min(1, h / top)),
+  };
+}
+
+/** Index of the last onset at or before `pos`, or -1. */
+export function lastOnset(table: BandTable, pos: number): number {
+  const o = table.onsets;
+  let lo = 0;
+  let hi = o.length - 1;
+  let found = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (o[mid]! <= pos) {
+      found = mid;
+      lo = mid + 1;
+    } else hi = mid - 1;
+  }
+  return found;
+}
+
+/** Strength of the strongest onset in `(from, to]`, 0 if none. */
+export function beatBetween(table: BandTable, from: number, to: number): number {
+  let best = 0;
+  for (let i = lastOnset(table, to); i >= 0 && table.onsets[i]! > from; i--) {
+    const s = table.strengths[i]!;
+    if (s > best) best = s;
+  }
+  return best;
 }
 
 function percentile(sorted: Float32Array, p: number): number {

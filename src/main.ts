@@ -68,7 +68,7 @@ import {
 import { button, checkbox, gradientControl, row, selectOf, slider } from './ui/controls.ts';
 import { CentersOverlay } from './ui/centers-overlay.ts';
 import { createPanelTabs } from './ui/panel-tabs.ts';
-import { TransportBar } from './ui/transport.ts';
+import { formatClock, TransportBar } from './ui/transport.ts';
 import { AudioPlayer } from './audio/player.ts';
 import type { AudioFeed } from './pipeline/modulation.ts';
 import { DebugOverlay } from './ui/debug-overlay.ts';
@@ -262,6 +262,13 @@ document.addEventListener('visibilitychange', () => {
 
 function frame(rawDt: number): void {
   if (source === null || ramp === null) return;
+  // A seek runs the pipeline itself; the screen keeps the last frame and
+  // the sound waits, then resyncs to the new clock.
+  if (seeking) {
+    player.sync(false, 0);
+    transport.update(playing, false, seekTarget, scrubLength());
+    return;
+  }
   const live = playing;
   let dt = live ? rawDt : pendingStep;
   pendingStep = 0;
@@ -269,7 +276,7 @@ function frame(rawDt: number): void {
   const heard = live ? player.clockNow() : -1;
   // With a track playing the picture follows what is heard (SPEC 10.1).
   if (heard >= 0) dt = Math.min(Math.max(heard - pipeline.ctx.time, 0), MAX_DT);
-  transport.update(playing, recorder.recording, pipeline.ctx.time);
+  transport.update(playing, recorder.recording, pipeline.ctx.time, scrubLength());
   if (live) input.tick(dt);
   if (live && recorder.recording) {
     // Pointer as this frame will see it, against the time the frame will have.
@@ -312,16 +319,86 @@ const loop = createLoop((dt) => {
 });
 
 const transport = new TransportBar(stage, {
-  toStart: () => pipeline.restart(),
-  togglePlay: () => setPlaying(!playing),
+  toStart: () => {
+    if (!seeking) pipeline.restart();
+  },
+  togglePlay: () => {
+    if (!seeking) setPlaying(!playing);
+  },
   step: () => {
     // Recording keeps the take continuous: no steps while it runs.
-    if (!playing && !recorder.recording) pendingStep = 1 / video.fps;
+    if (!playing && !recorder.recording && !seeking) pendingStep = 1 / video.fps;
   },
   toggleRecord: () => {
-    if (source !== null && rendering === null) void toggleRecording();
+    if (source !== null && rendering === null && !seeking) void toggleRecording();
   },
+  seek: (seconds) => void seekTo(seconds),
 });
+
+// Without a track the scrub bar spans this much, growing with the clock.
+const SCRUB_DEFAULT = 30;
+// Seek warm-up: effects with state (rings, cursor handover, decode) are
+// rebuilt over this many seconds before the target, in coarse steps, then
+// the last second in exact 1/fps steps.
+const SEEK_WARMUP = 10;
+const SEEK_COARSE = MAX_DT;
+const SEEK_FINE = 1;
+// Frames run per slice before yielding to the page.
+const SEEK_SLICE = 40;
+
+function scrubLength(): number {
+  const span = player.span;
+  return span > 0 ? span : Math.max(SCRUB_DEFAULT, Math.ceil(pipeline.ctx.time / 10) * 10);
+}
+
+let seeking = false;
+// Where a running seek goes; the scrub bar holds it meanwhile. -1 = none.
+let seekTarget = -1;
+
+/**
+ * Seek (SPEC 10.1): restart with the clock just before the target, then a
+ * short warm-up without drawing so effects with state come out as they
+ * would: coarse steps, then exact 1/fps for the last second. Cost does not
+ * grow with the target; the pointer counts as away meanwhile.
+ */
+async function seekTo(target: number): Promise<void> {
+  if (seeking || recorder.recording || source === null) return;
+  seeking = true;
+  seekTarget = target;
+  const ptr = input.pointer;
+  ptr.inside = false;
+  ptr.clicked = false;
+  try {
+    const fine = 1 / video.fps;
+    const fineFrames = Math.round(Math.min(SEEK_FINE, target) / fine);
+    const fineStart = target - fineFrames * fine;
+    const warmStart = Math.max(0, fineStart - SEEK_WARMUP);
+    const coarseFrames = Math.ceil((fineStart - warmStart) / SEEK_COARSE);
+    pipeline.restartAt(warmStart);
+    const steps: Array<[count: number, dt: number]> = [];
+    // Coarse steps land exactly on `fineStart`.
+    if (coarseFrames > 0) steps.push([coarseFrames, (fineStart - warmStart) / coarseFrames]);
+    steps.push([fineFrames, fine]);
+    let done = 0;
+    const total = Math.max(1, coarseFrames + fineFrames);
+    for (const [count, dt] of steps) {
+      for (let i = 0; i < count; i++) {
+        pipeline.frame(dt);
+        if (++done % SEEK_SLICE === 0) {
+          setStatus(`seeking · ${Math.round((done / total) * 100)}%`);
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+      }
+    }
+    setStatus(`at ${formatClock(pipeline.ctx.time)}`);
+  } catch (err) {
+    console.error(err);
+    setStatus(`seek failed: ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    seeking = false;
+    seekTarget = -1;
+  }
+}
 
 function setPlaying(on: boolean): void {
   playing = on;

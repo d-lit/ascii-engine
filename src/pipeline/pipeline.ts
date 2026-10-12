@@ -25,6 +25,8 @@ import {
   type ColorSettings,
 } from './colorize.ts';
 import { setModEnv, type AudioFeed, type ModEnv } from './modulation.ts';
+import { beatBetween } from '../audio/bands.ts';
+import { forEachHeard } from '../audio/track.ts';
 import { createMaskScratch, fillMask, type MaskScratch, type MaskSpec } from './mask.ts';
 import {
   createParamBag,
@@ -143,6 +145,7 @@ export class Pipeline {
       rows: source.rows,
       cellAspect: meta.cellAspect,
       pointer,
+      beat: 0,
       rand: createRand(seed),
       source,
     };
@@ -182,6 +185,7 @@ export class Pipeline {
     const ctx = this.ctx;
     ctx.time = 0;
     ctx.dt = 0;
+    ctx.beat = 0;
     ctx.frame = 0;
     ctx.rand = createRand(this.seed);
     for (const entry of this.chain) {
@@ -190,6 +194,16 @@ export class Pipeline {
       entry.instance = entry.def.create(entry.params);
     }
     this.rebuild();
+  }
+
+  /**
+   * Restart, then put the clock at `time` without running frames: effect
+   * clocks read `time` (stateless parts are exact), state starts fresh.
+   * Seeking runs a short warm-up after this (SPEC 10.1).
+   */
+  restartAt(time: number): void {
+    this.restart();
+    this.ctx.time = time < 0 ? 0 : time;
   }
 
   add(
@@ -279,6 +293,7 @@ export class Pipeline {
     ctx.dt = dt < 0 ? 0 : dt > MAX_DT ? MAX_DT : dt;
     ctx.time += ctx.dt;
     ctx.frame++;
+    ctx.beat = this.beatIn(ctx.time - ctx.dt, ctx.time);
 
     for (let e = 0; e < this.chain.length; e++) {
       const entry = this.chain[e]!;
@@ -316,6 +331,23 @@ export class Pipeline {
     ctx.pointer.clicked = false;
     return this.work;
   }
+
+  /** Strongest beat heard in `(prev, now]` of transport time; 0 without a track. */
+  private beatIn(prev: number, now: number): number {
+    const feed = this.modEnv.audio;
+    if (feed === null) return 0;
+    this.beatAcc = 0;
+    forEachHeard(prev, now, feed.timing, this.visitBeats);
+    return this.beatAcc;
+  }
+
+  private beatAcc = 0;
+  private readonly visitBeats = (from: number, to: number): void => {
+    const feed = this.modEnv.audio;
+    if (feed === null) return;
+    const b = beatBetween(feed.bands, from, to);
+    if (b > this.beatAcc) this.beatAcc = b;
+  };
 
   /** Track for `audio` params (SPEC 7.2); null = silent, params sit at `min`. */
   setAudio(feed: AudioFeed | null): void {

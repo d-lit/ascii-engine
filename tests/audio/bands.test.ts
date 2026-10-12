@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyseBands, mixToMono, sampleBand } from '../../src/audio/bands.ts';
+import { analyseBands, lastOnset, mixToMono, sampleBand } from '../../src/audio/bands.ts';
 
 const RATE = 22050;
 
@@ -59,5 +59,37 @@ describe('sampleBand', () => {
 describe('mixToMono', () => {
   it('averages channels', () => {
     expect([...mixToMono([Float32Array.of(1, 0), Float32Array.of(0, 1)])]).toEqual([0.5, 0.5]);
+  });
+});
+
+/** Kick-like: a 70 Hz thump fading over ~0.1 s, as a real bass drum (no click at the end). */
+function kick(age: number, t: number): number {
+  return 0.6 * Math.exp(-age / 0.08) * Math.sin(2 * Math.PI * 70 * t);
+}
+
+describe('onsets', () => {
+  it('finds a beat at each burst start, none in between', () => {
+    const s = new Float32Array(RATE * 4);
+    for (let i = 0; i < s.length; i++) {
+      const t = i / RATE;
+      s[i] = kick(t % 1, t);
+    }
+    const t = analyseBands(s, RATE);
+    const beats = [...t.onsets];
+    expect(beats.length).toBe(4);
+    beats.forEach((b, k) => expect(Math.abs(b - k)).toBeLessThan(0.06));
+    expect(Math.min(...t.strengths)).toBeGreaterThan(0.3);
+  });
+
+  it('lastOnset finds the latest beat at or before a time', () => {
+    const s = new Float32Array(RATE * 3);
+    for (let i = 0; i < s.length; i++) {
+      const t = i / RATE;
+      s[i] = kick(t % 1, t);
+    }
+    const t = analyseBands(s, RATE);
+    expect(lastOnset(t, -1)).toBe(-1);
+    expect(lastOnset(t, 1.5)).toBe(1);
+    expect(lastOnset(t, 99)).toBe(t.onsets.length - 1);
   });
 });

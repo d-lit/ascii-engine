@@ -6,7 +6,8 @@ const MAX_RINGS = 8;
 /**
  * Circular waves that push the sample point along the radius. `continuous`
  * radiates from `center` all the time; `click` launches a ring at the pointer
- * on every click (up to 8 at once, oldest replaced). Distances, amplitude and
+ * on every click, `beat` one at `center` on every beat of the track, as
+ * strong as the beat (up to 8 rings at once, oldest replaced). Distances, amplitude and
  * speed are in cell widths, so rings stay round on screen.
  */
 export const ripple = defineEffect({
@@ -14,8 +15,8 @@ export const ripple = defineEffect({
   name: 'Ripple',
   kind: 'displace',
   params: {
-    mode: { type: 'select', options: ['continuous', 'click'], default: 'continuous' },
-    center: { type: 'point', default: 'pointer', label: 'center (continuous)' },
+    mode: { type: 'select', options: ['continuous', 'click', 'beat'], default: 'continuous' },
+    center: { type: 'point', default: 'pointer', label: 'center (continuous, beat)' },
     amplitude: { type: 'number', min: 0, max: 6, step: 0.1, default: 1.5, label: 'amplitude, cells', random: [0.5, 3] },
     wavelength: { type: 'number', min: 2, max: 80, step: 1, default: 12, label: 'wavelength, cells', random: [6, 30] },
     speed: { type: 'number', min: 0, max: 120, step: 1, default: 24, label: 'speed, cells/s', random: [8, 40] },
@@ -27,6 +28,8 @@ export const ripple = defineEffect({
     const ringX = new Float64Array(MAX_RINGS);
     const ringY = new Float64Array(MAX_RINGS);
     const ringT0 = new Float64Array(MAX_RINGS).fill(-1);
+    // Ring strength: 1 for a click, the beat's strength for a beat.
+    const ringA = new Float64Array(MAX_RINGS);
     let next = 0;
     let lastFrame = -1;
 
@@ -36,7 +39,7 @@ export const ripple = defineEffect({
         const t = ctx.time;
         const aspect = ctx.cellAspect;
 
-        // Once per frame: launch a ring on click.
+        // Once per frame: launch a ring on a click or a beat.
         if (ctx.frame !== lastFrame) {
           lastFrame = ctx.frame;
           const ptr = ctx.pointer;
@@ -44,6 +47,13 @@ export const ripple = defineEffect({
             ringX[next] = ptr.x;
             ringY[next] = ptr.y;
             ringT0[next] = t;
+            ringA[next] = 1;
+            next = (next + 1) % MAX_RINGS;
+          } else if (p.mode === 'beat' && ctx.beat > 0) {
+            ringX[next] = p.center.x;
+            ringY[next] = p.center.y;
+            ringT0[next] = t;
+            ringA[next] = ctx.beat;
             next = (next + 1) % MAX_RINGS;
           }
         }
@@ -79,7 +89,7 @@ export const ripple = defineEffect({
             // Wave packet around the travelling front, fading with age.
             const u = (d - p.speed * age) / p.wavelength;
             if (u < -2 || u > 2) continue;
-            let off = p.amplitude * Math.sin(TAU * u) * Math.exp(-u * u * 2) * (1 - age / p.life);
+            let off = p.amplitude * ringA[r]! * Math.sin(TAU * u) * Math.exp(-u * u * 2) * (1 - age / p.life);
             if (p.decay > 0) off *= Math.exp(-d / p.decay);
             ox += (off * dx) / d;
             oy += (off * dy) / d;

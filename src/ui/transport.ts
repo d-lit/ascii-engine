@@ -9,6 +9,12 @@ export interface TransportActions {
   toggleRecord(): void;
 }
 
+/** Scrub bar: where it may go, and what to do when released. */
+export interface TransportSeek {
+  /** Jump to `seconds` of transport time. */
+  seek(seconds: number): void;
+}
+
 /** `m:ss.cc` for the transport counter. */
 export function formatClock(seconds: number): string {
   const cs = Math.max(0, Math.floor(seconds * 100));
@@ -66,19 +72,37 @@ export class TransportBar {
   private readonly stepButton: HTMLButtonElement;
   private readonly record: HTMLButtonElement;
   private readonly clock = document.createElement('output');
+  private readonly scrub = document.createElement('input');
   private shownClock = '';
+  private dragging = false;
+  private length = 0;
 
-  constructor(stage: HTMLElement, actions: TransportActions) {
+  constructor(stage: HTMLElement, actions: TransportActions & TransportSeek) {
     this.bar.className = 'transport';
     this.play = iconButton('⏸', 'pause (Space)', () => actions.togglePlay());
     this.stepButton = iconButton('>|', 'next frame (→), while paused', () => actions.step());
     this.record = iconButton('●', 'record (R), settings on the export tab', () => actions.toggleRecord());
     this.record.classList.add('rec');
+    this.scrub.type = 'range';
+    this.scrub.min = '0';
+    this.scrub.step = 'any';
+    this.scrub.title = 'drag to seek';
+    this.scrub.addEventListener('pointerdown', () => (this.dragging = true));
+    this.scrub.addEventListener('input', () => {
+      this.dragging = true;
+      this.showClock(Number(this.scrub.value));
+    });
+    this.scrub.addEventListener('change', () => {
+      this.dragging = false;
+      actions.seek(Number(this.scrub.value));
+      this.scrub.blur();
+    });
     this.bar.append(
       iconButton('|<', 'to start (Home)', () => actions.toStart()),
       this.play,
       this.stepButton,
       this.record,
+      this.scrub,
       this.clock,
     );
     this.bar.hidden = true;
@@ -99,8 +123,11 @@ export class TransportBar {
     this.bar.hidden = !v;
   }
 
-  /** Reflects the state; cheap to call every frame. */
-  update(playing: boolean, recording: boolean, seconds: number): void {
+  /**
+   * Reflects the state; cheap to call every frame. `length` is the scrub
+   * range (the track, or a default that grows with the clock).
+   */
+  update(playing: boolean, recording: boolean, seconds: number, length: number): void {
     const play = playing ? '⏸' : '▶';
     if (this.play.textContent !== play) {
       this.play.textContent = play;
@@ -108,6 +135,17 @@ export class TransportBar {
     }
     this.stepButton.disabled = playing;
     this.record.classList.toggle('on', recording);
+    this.scrub.disabled = recording;
+    if (length !== this.length) {
+      this.length = length;
+      this.scrub.max = String(length);
+    }
+    if (this.dragging) return;
+    this.scrub.value = String(Math.min(seconds, length));
+    this.showClock(seconds);
+  }
+
+  private showClock(seconds: number): void {
     const text = formatClock(seconds);
     if (text !== this.shownClock) {
       this.clock.textContent = text;
