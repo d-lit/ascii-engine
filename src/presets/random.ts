@@ -150,6 +150,8 @@ export function randomChain(
   let displace = 0;
   for (const def of pool) {
     if (chosen.length >= want) break;
+    // Systems take over the picture; added by hand for now (phase 5).
+    if (def.kind === 'system') continue;
     if (def.kind === 'displace') {
       if (displace >= o.maxDisplace) continue;
       displace++;

@@ -5,6 +5,7 @@ import { parseHex } from '../core/color.ts';
 import { DEFAULT_CROP, type Crop, type PlacedRect } from '../core/placement.ts';
 import { paintFrame, prepareBackdrop, type Backdrop, type BackdropImage, type Rect } from './backdrop.ts';
 import { Compositor } from './compositor.ts';
+import { SpriteLayer } from './sprite-layer.ts';
 import type { Renderer } from './renderer.ts';
 
 /** Hex colours, `#rgb` or `#rrggbb`. */
@@ -121,6 +122,13 @@ export class Canvas2DRenderer implements Renderer {
   private pictureFrac: PlacedRect = { x: 0, y: 0, w: 1, h: 1 };
   private compositor: Compositor | null = null;
   private image: ImageData | null = null;
+  // Sprites over the glyph layer (SPEC 6.3); same size as the glyph layer.
+  private readonly spriteCanvas: HTMLCanvasElement = document.createElement('canvas');
+  private spriteCtx: CanvasRenderingContext2D | null = null;
+  private sprites: SpriteLayer | null = null;
+  private spriteImage: ImageData | null = null;
+  // The sprite canvas holds something: drawn with the frame.
+  private spritesShown = false;
   private atlas: GlyphAtlas | null = null;
   // Theme the ink palette was built for; rebuilt on change only.
   private inkFor: ThemeColors | null = null;
@@ -248,6 +256,12 @@ export class Canvas2DRenderer implements Renderer {
     this.underDirty = true;
     this.compositor = new Compositor(cols, rows, cell.w, cell.h);
     this.image = new ImageData(this.compositor.pixels, pw, ph);
+    this.spriteCanvas.width = pw;
+    this.spriteCanvas.height = ph;
+    this.spriteCtx = this.spriteCanvas.getContext('2d', { alpha: true });
+    this.sprites = new SpriteLayer(pw, ph, cell.w, cell.h);
+    this.spriteImage = new ImageData(this.sprites.pixels, pw, ph);
+    this.spritesShown = false;
     this.inkFor = null;
     this.atlas = null;
     this.frameDirty = true;
@@ -264,7 +278,9 @@ export class Canvas2DRenderer implements Renderer {
 
     const theme = this.opts.themes[meta.polarity];
     if (this.inkFor !== theme) {
-      compositor.setInk(parseHex(theme.fg));
+      const ink = parseHex(theme.fg);
+      compositor.setInk(ink);
+      this.sprites?.setInk(ink);
       this.inkFor = theme;
       this.underDirty = true; // the theme backdrop colour may have changed too
       this.frameDirty = true;
@@ -276,16 +292,26 @@ export class Canvas2DRenderer implements Renderer {
     compositor.compose(work, ramp, meta.polarity, useSourceChars, quantizeMode, this.atlas);
 
     const { dirtyTop, dirtyBottom } = compositor;
-    const layerDirty = dirtyBottom > dirtyTop;
+    let layerDirty = dirtyBottom > dirtyTop;
     if (layerDirty) {
       this.layerCtx.putImageData(image, 0, 0, 0, dirtyTop, compositor.width, dirtyBottom - dirtyTop);
+    }
+    // Sprites: drawn while there are some, and once more to clear the last ones.
+    const sprites = this.sprites;
+    if (sprites !== null && this.spriteCtx !== null && this.spriteImage !== null && (work.sprites.count > 0 || this.spritesShown)) {
+      sprites.draw(work, ramp, meta.polarity, useSourceChars, quantizeMode, this.atlas);
+      if (sprites.dirty) {
+        this.spriteCtx.putImageData(this.spriteImage, 0, 0, sprites.dirtyX, sprites.dirtyY, sprites.dirtyW, sprites.dirtyH);
+        layerDirty = true;
+      }
+      this.spritesShown = work.sprites.count > 0;
     }
     if (this.underDirty) {
       prepareBackdrop(this.under, this.backdrop, theme.bg, this.backdropImage, pictureRect(this.gridRect, this.pictureFrac), this.backdropCrop);
       this.underDirty = false;
     }
     if (layerDirty || this.frameDirty) {
-      paintFrame(this.ctx, this.layer, this.under, 0, 0, this.drawW, this.drawH);
+      paintFrame(this.ctx, this.layer, this.under, 0, 0, this.drawW, this.drawH, this.spriteCanvas);
       this.frameDirty = false;
     }
   }

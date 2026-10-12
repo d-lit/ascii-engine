@@ -18,6 +18,9 @@ export class DebugOverlay {
   private frameAvg = 0;
   private sinceRefresh = 0;
   private extra = '';
+  // Live sprites (SPEC 10); shown while a system has produced some.
+  private sprites = 0;
+  private spritesSeen = false;
 
   constructor(parent: HTMLElement, stages: readonly string[]) {
     this.names = stages;
@@ -42,6 +45,12 @@ export class DebugOverlay {
     this.draw();
   }
 
+  /** Sprites drawn this frame; cheap, call every frame. */
+  setSprites(count: number): void {
+    this.sprites = count;
+    if (count > 0) this.spritesSeen = true;
+  }
+
   /** Static line shown under the numbers (grid size and so on). */
   setInfo(text: string): void {
     this.extra = text;
@@ -57,6 +66,7 @@ export class DebugOverlay {
     for (let s = 0; s < this.names.length; s++) {
       text += `\n${this.names[s]!.padEnd(7)}${this.avg[s]!.toFixed(2).padStart(6)} ms`;
     }
+    if (this.spritesSeen) text += `\n${'sprites'.padEnd(7)}${String(this.sprites).padStart(6)}`;
     if (this.extra) text += `\n${this.extra}`;
     this.el.textContent = text;
   }

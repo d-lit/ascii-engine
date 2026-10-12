@@ -144,6 +144,7 @@ export class Compositor {
     const { cols, rows, cellW, cellH, width, px, palette, prevCode, prevAlpha, prevInk } = this;
     const alpha = work.alpha;
     const color = work.color;
+    const hidden = work.hidden;
     const tile = cellW * cellH;
     let top = -1;
     let bottom = -1;
@@ -153,7 +154,8 @@ export class Compositor {
     for (let y = 0; y < rows; y++) {
       const rowBase = y * cellH * width;
       for (let x = 0; x < cols; x++, i++) {
-        const code = resolveCellChar(work, i, ramp, polarity, useSourceChars, mode);
+        // A cell drawn by a sprite this frame is empty in the grid (SPEC 6.3).
+        const code = hidden[i] === 1 ? 0 : resolveCellChar(work, i, ramp, polarity, useSourceChars, mode);
         const slot = code === 0 ? -1 : masks.slot(code);
         const scale = slot < 0 ? 0 : alphaScale(alpha[i]!);
         // Empty and fully transparent cells look the same: store them alike.
@@ -223,6 +225,7 @@ export class Compositor {
     const alpha = work.alpha;
     const color = work.color;
     const plate = work.plate!; // checked by compose()
+    const hidden = work.hidden;
     const pal = this.platePalette;
     const tile = cellW * cellH;
     let top = -1;
@@ -233,7 +236,8 @@ export class Compositor {
     for (let y = 0; y < rows; y++) {
       const rowBase = y * cellH * width;
       for (let x = 0; x < cols; x++, i++) {
-        const code = resolveCellChar(work, i, ramp, polarity, useSourceChars, mode);
+        // A cell drawn by a sprite this frame is empty in the grid (SPEC 6.3).
+        const code = hidden[i] === 1 ? 0 : resolveCellChar(work, i, ramp, polarity, useSourceChars, mode);
         const slot = code === 0 ? -1 : masks.slot(code);
         const scale = slot < 0 ? 0 : alphaScale(alpha[i]!);
         const key = scale === 0 ? 0 : code;
@@ -244,7 +248,8 @@ export class Compositor {
         const pr = plate[i * 4]!;
         const pg = plate[i * 4 + 1]!;
         const pb = plate[i * 4 + 2]!;
-        const pa = plate[i * 4 + 3]!;
+        // Plates do not travel with sprites: a hidden cell loses its plate too.
+        const pa = hidden[i] === 1 ? 0 : plate[i * 4 + 3]!;
         const plateKey = pa === 0 ? 0 : ((pr >> 3) << 15) | ((pg >> 3) << 10) | ((pb >> 3) << 5) | (pa >> 4) | (1 << 20);
         if (key === prevCode[i] && scale === prevAlpha[i] && ink === prevInk[i] && plateKey === prevPlate[i]) {
           continue;

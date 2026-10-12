@@ -15,6 +15,7 @@ import type {
   CellRef,
   DisplaceFn,
   EffectInstance,
+  SystemInstance,
 } from '../effects/types.ts';
 import {
   buildGradientLut,
@@ -76,6 +77,8 @@ export interface StageTimings {
   /** source -> work: plain copy, or displaced bilinear sampling. */
   sample: number;
   cell: number;
+  /** Systems: particles, trails, sand. */
+  system: number;
   /** Colour mode plus colour-writing effects. */
   post: number;
   total: number;
@@ -91,7 +94,7 @@ export function createPointer(): Pointer {
  */
 export class Pipeline {
   readonly chain: ChainEntry[] = [];
-  readonly timings: StageTimings = { params: 0, sample: 0, cell: 0, post: 0, total: 0 };
+  readonly timings: StageTimings = { params: 0, sample: 0, cell: 0, system: 0, post: 0, total: 0 };
   readonly ctx: FrameContext;
 
   private source: Field;
@@ -109,6 +112,12 @@ export class Pipeline {
   private displaceFns: DisplaceFn[] = [];
   private displaceMix = new Float64Array(0);
   private displaceMasks: Array<Float32Array | null> = [];
+  private systemEntries: ChainEntry[] = [];
+  private systems: SystemInstance[] = [];
+  private systemMix = new Float64Array(0);
+  private systemMasks: Array<Float32Array | null> = [];
+  // Systems ran last frame: their hidden cells and sprites need clearing once.
+  private systemsDirty = false;
   private postEntries: ChainEntry[] = [];
   private postFns: CellFn[] = [];
   private postMix = new Float64Array(0);
@@ -302,6 +311,7 @@ export class Pipeline {
     this.resolveWeights(this.cellEntries, this.cellMix);
     this.resolveWeights(this.displaceEntries, this.displaceMix);
     this.resolveWeights(this.postEntries, this.postMix);
+    this.resolveWeights(this.systemEntries, this.systemMix);
     const t1 = performance.now();
 
     if (this.displaceFns.length > 0) this.runDisplace();
@@ -310,6 +320,9 @@ export class Pipeline {
 
     if (this.cellFns.length > 0) this.runCells(this.cellFns, this.cellMix, this.cellMasks);
     const t3 = performance.now();
+
+    this.runSystems();
+    const t3s = performance.now();
 
     if (this.needColor || this.needPlate) {
       colorize(this.work, this.source, this.color.mode, this.ink, this.lut);
@@ -324,7 +337,8 @@ export class Pipeline {
     tm.params = t1 - t0;
     tm.sample = t2 - t1;
     tm.cell = t3 - t2;
-    tm.post = t4 - t3;
+    tm.system = t3s - t3;
+    tm.post = t4 - t3s;
     tm.total = t4 - t0;
 
     // One-frame pulse: consumed by this frame's effects.
@@ -352,6 +366,29 @@ export class Pipeline {
   /** Track for `audio` params (SPEC 7.2); null = silent, params sit at `min`. */
   setAudio(feed: AudioFeed | null): void {
     this.modEnv.audio = feed;
+  }
+
+  /**
+   * System stage (SPEC 6.3): hidden cells and sprites start empty every
+   * frame, then each system steps in chain order.
+   */
+  private runSystems(): void {
+    const { work, systems, systemMix, systemMasks, ctx } = this;
+    if (systems.length === 0) {
+      if (this.systemsDirty) {
+        work.hidden.fill(0);
+        work.sprites.count = 0;
+        this.systemsDirty = false;
+      }
+      return;
+    }
+    work.hidden.fill(0);
+    work.sprites.count = 0;
+    for (let s = 0; s < systems.length; s++) {
+      const mix = systemMix[s]!;
+      if (mix > 0) systems[s]!.step(ctx, work, systemMasks[s]!, mix);
+    }
+    this.systemsDirty = true;
   }
 
   private resolve(entry: ChainEntry): void {
@@ -396,6 +433,9 @@ export class Pipeline {
     const postEntries: ChainEntry[] = [];
     const postFns: CellFn[] = [];
     const postMasks: Array<Float32Array | null> = [];
+    const systemEntries: ChainEntry[] = [];
+    const systems: SystemInstance[] = [];
+    const systemMasks: Array<Float32Array | null> = [];
     for (const entry of this.chain) {
       if (!entry.enabled) continue;
       const inst = entry.instance;
@@ -412,8 +452,16 @@ export class Pipeline {
         displaceEntries.push(entry);
         displaceFns.push(inst.apply);
         displaceMasks.push(mask);
+      } else {
+        systemEntries.push(entry);
+        systems.push(inst.system);
+        systemMasks.push(mask);
       }
     }
+    this.systemEntries = systemEntries;
+    this.systems = systems;
+    this.systemMasks = systemMasks;
+    this.systemMix = new Float64Array(systems.length).fill(1);
     this.cellEntries = cellEntries;
     this.cellFns = cellFns;
     this.cellMasks = cellMasks;

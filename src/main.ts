@@ -179,8 +179,8 @@ const input = new PointerInput(canvas, () => {
 // presets can be edited before any picture is loaded.
 registerBuiltinEffects();
 const pipeline = new Pipeline(createField(1, 1), meta, input.pointer);
-const overlay = new DebugOverlay(stage, ['params', 'sample', 'cell', 'post', 'render', 'total']);
-const stageMs = new Float64Array(6);
+const overlay = new DebugOverlay(stage, ['params', 'sample', 'cell', 'system', 'post', 'render', 'total']);
+const stageMs = new Float64Array(7);
 overlay.visible = false;
 const centers = new CentersOverlay(stage, canvas);
 centers.visible = false;
@@ -294,9 +294,11 @@ function frame(rawDt: number): void {
   stageMs[0] = tm.params;
   stageMs[1] = tm.sample;
   stageMs[2] = tm.cell;
-  stageMs[3] = tm.post;
-  stageMs[4] = renderMs;
-  stageMs[5] = tm.total + renderMs;
+  stageMs[3] = tm.system;
+  stageMs[4] = tm.post;
+  stageMs[5] = renderMs;
+  stageMs[6] = tm.total + renderMs;
+  overlay.setSprites(work.sprites.count);
   if (live) overlay.sample(dt, stageMs);
   if (debugToggle.checked) {
     // Debug only: gridRect allocates, so not on the normal frame path.

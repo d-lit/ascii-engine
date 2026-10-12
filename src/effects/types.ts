@@ -23,12 +23,16 @@ export interface CellRef {
 
 export type CellFn = (cell: CellRef, x: number, y: number, ctx: FrameContext) => void;
 
+/**
+ * An effect with state over time (SPEC 6.3, DECISIONS 024): particles,
+ * trails, sand. Runs once per frame after the cell stage, before colour.
+ * Sets up on its first step (and whenever the grid size changes); a restart
+ * recreates the instance. Writes `work.hidden` and `work.sprites`, or the
+ * grid itself. `mask` (per cell 0..1, null = everywhere) says where it acts;
+ * `mix` is its strength.
+ */
 export interface SystemInstance {
-  init(ctx: FrameContext, work: WorkBuffer): void;
-  update(ctx: FrameContext): void;
-  render(work: WorkBuffer, ctx: FrameContext): void;
-  reset?(): void;
-  dispose?(): void;
+  step(ctx: FrameContext, work: WorkBuffer, mask: Float32Array | null, mix: number): void;
 }
 
 export type EffectInstance =

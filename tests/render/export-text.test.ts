@@ -28,6 +28,18 @@ describe('exportText', () => {
     expect(exportText(w, ramp, 'light-on-dark', opts)).toBe(' . \n@@@\n');
   });
 
+  it('puts sprites in the nearest cell and leaves the cells they came from empty', () => {
+    const w = grid();
+    w.hidden[0] = 1; // '@' flew away...
+    w.sprites.x[0] = 2.4; // ...to the nearest cell (2, 1)
+    w.sprites.y[0] = 0.6;
+    w.sprites.src[0] = 0;
+    w.sprites.alpha[0] = 1;
+    w.sprites.count = 1;
+    w.lum.set([0, 0, 0], 3);
+    expect(exportText(w, ramp, 'light-on-dark', opts)).toBe(' . \n  @\n');
+  });
+
   it('trims trailing spaces but keeps every row, including empty ones', () => {
     const w = grid();
     w.lum.set([0, 0, 0], 3);

@@ -10,10 +10,11 @@ Turn a picture into living ASCII art in the browser: ripples that follow the cur
 
 - **Any source.** Drop a photo, or a plain-text ASCII art file (`.txt`, `.asc`, `.nfo`).
 - **Proper ASCII.** Characters are chosen by measured glyph density, not by a naive brightness ladder. Five character ramps, light-on-dark or dark-on-light, block glyphs (`░▒▓█`) drawn procedurally so they tile without seams.
-- **13 effects in a chain.**
+- **14 effects in a chain.**
   - *Displace* — `ripple`, `swirl`, `lens`, `liquid`, `glitch-rows`, `shake`;
   - *Cell* — `wave`, `pulse`, `erosion`, `decode`;
-  - *Colour* — `tint`, `hue-cycle`, `glow`.
+  - *Colour* — `tint`, `hue-cycle`, `glow`;
+  - *System* — `particles`: characters fly off their cells and spring back (more systems coming).
 
   Add any of them (even twice), reorder, mix, mask.
 - **Everything moves.** Any numeric parameter can be a constant, an LFO (sine, triangle, saw, square, noise) or a looping envelope. Effects have strength (`mix`) and masks (radial, rectangle, brightness, alpha). Effect centres sit on a 3×3 grid or anywhere (even off the edge), follow the cursor, or move by themselves: orbit, Lissajous, wander, sweep, bounce, keyframes — and hand over smoothly to the cursor when it arrives.

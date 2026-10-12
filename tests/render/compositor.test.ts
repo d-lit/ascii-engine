@@ -84,6 +84,15 @@ describe('Compositor', () => {
     expect([c.dirtyTop, c.dirtyBottom]).toEqual([0, 2]);
   });
 
+  it('leaves a hidden cell empty: a sprite draws it (SPEC 6.3)', () => {
+    const c = setup(2);
+    const w = work([1, 1]);
+    w.hidden[1] = 1;
+    c.compose(w, ramp, 'light-on-dark', true, 'nearest-density', fakeMasks());
+    expect(pixel(c, 0, 0)).toEqual([...FG, 255]);
+    expect(pixel(c, 2, 0)).toEqual(CLEAR);
+  });
+
   it('turns partial cell alpha into pixel alpha, not into a blend', () => {
     const c = setup(1);
     c.compose(work([1], [0.5]), ramp, 'light-on-dark', true, 'nearest-density', fakeMasks());

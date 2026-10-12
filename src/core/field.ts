@@ -17,6 +17,32 @@ export interface FieldMeta {
 }
 
 /** Per-frame mutable target. Effects write here; `source` stays untouched. */
+/**
+ * Freely placed glyphs drawn over the grid (SPEC 6.3). A sprite shows the
+ * glyph and colour of its source cell `src` as resolved this frame, at `x, y`
+ * in cell units (the cell's top-left corner at integers), times `alpha`.
+ * Filled by systems each frame; `count` is how many are live.
+ */
+export interface SpritePool {
+  count: number;
+  readonly capacity: number;
+  readonly x: Float32Array;
+  readonly y: Float32Array;
+  readonly src: Int32Array;
+  readonly alpha: Float32Array;
+}
+
+export function createSpritePool(capacity: number): SpritePool {
+  return {
+    count: 0,
+    capacity,
+    x: new Float32Array(capacity),
+    y: new Float32Array(capacity),
+    src: new Int32Array(capacity),
+    alpha: new Float32Array(capacity),
+  };
+}
+
 export interface WorkBuffer {
   readonly cols: number;
   readonly rows: number;
@@ -27,6 +53,13 @@ export interface WorkBuffer {
   plate: Uint8ClampedArray | null;
   char: Uint16Array;
   charOverride: Uint16Array;
+  /**
+   * 1 = the cell is drawn by a sprite this frame and left empty in the grid
+   * (its data stays for the sprite). Written by systems (SPEC 6.3).
+   */
+  hidden: Uint8Array;
+  /** One slot per cell: a system moves at most every cell. */
+  sprites: SpritePool;
 }
 
 export interface FieldOptions {
@@ -70,6 +103,8 @@ export function createWorkBuffer(cols: number, rows: number, opts: FieldOptions 
     plate: null,
     char: new Uint16Array(n),
     charOverride: new Uint16Array(n),
+    hidden: new Uint8Array(n),
+    sprites: createSpritePool(n),
   };
 }
 

@@ -6,6 +6,7 @@ import { getAtlas } from '../render/atlas.ts';
 import { paintFrame, prepareBackdrop, type Backdrop, type BackdropImage } from '../render/backdrop.ts';
 import { fillFrame, layoutFrame, pictureRect } from '../render/canvas2d.ts';
 import { Compositor } from '../render/compositor.ts';
+import { SpriteLayer } from '../render/sprite-layer.ts';
 
 /** Everything that decides how a work buffer looks in an exported frame. */
 export interface FrameLook {
@@ -63,6 +64,15 @@ export function createFramePainter(look: FrameLook): FramePainter {
   if (!ctx || !layerCtx) throw new Error('createFramePainter: no 2d context');
   compositor.setInk(look.ink);
   const image = new ImageData(compositor.pixels, compositor.width, compositor.height);
+  // Sprites over the glyph layer (SPEC 6.3).
+  const spriteLayer = new SpriteLayer(compositor.width, compositor.height, layout.cellW, layout.cellH);
+  spriteLayer.setInk(look.ink);
+  const spriteCanvas = document.createElement('canvas');
+  spriteCanvas.width = compositor.width;
+  spriteCanvas.height = compositor.height;
+  const spriteCtx = spriteCanvas.getContext('2d', { alpha: true });
+  if (!spriteCtx) throw new Error('createFramePainter: no 2d context');
+  const spriteImage = new ImageData(spriteLayer.pixels, compositor.width, compositor.height);
   // Static backdrop at the target size; the grid rect keeps `grid` fit aligned.
   const under = document.createElement('canvas');
   under.width = width;
@@ -81,8 +91,12 @@ export function createFramePainter(look: FrameLook): FramePainter {
       if (dirtyBottom > dirtyTop) {
         layerCtx.putImageData(image, 0, 0, 0, dirtyTop, compositor.width, dirtyBottom - dirtyTop);
       }
-      // Every frame is a full picture: backdrop, then glyphs.
-      paintFrame(ctx, layer, under, grid.x, grid.y, grid.w, grid.h);
+      spriteLayer.draw(work, ramp, look.polarity, look.useSourceChars, look.quantizeMode, atlas);
+      if (spriteLayer.dirty) {
+        spriteCtx.putImageData(spriteImage, 0, 0, spriteLayer.dirtyX, spriteLayer.dirtyY, spriteLayer.dirtyW, spriteLayer.dirtyH);
+      }
+      // Every frame is a full picture: backdrop, glyphs, sprites.
+      paintFrame(ctx, layer, under, grid.x, grid.y, grid.w, grid.h, spriteCanvas);
     },
   };
 }

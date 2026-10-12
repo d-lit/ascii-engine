@@ -144,6 +144,8 @@ export function paintFrame(
   y: number,
   w?: number,
   h?: number,
+  /** Sprite layer (SPEC 6.3), same size and place as the glyph layer. */
+  sprites: CanvasImageSource | null = null,
 ): void {
   const { width, height } = ctx.canvas;
   ctx.clearRect(0, 0, width, height);
@@ -153,9 +155,12 @@ export function paintFrame(
   } else if (under !== null) {
     ctx.drawImage(under, 0, 0);
   }
-  if (w === undefined || h === undefined) ctx.drawImage(layer, x, y);
-  else {
+  if (w === undefined || h === undefined) {
+    ctx.drawImage(layer, x, y);
+    if (sprites !== null) ctx.drawImage(sprites, x, y);
+  } else {
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(layer, x, y, w, h);
+    if (sprites !== null) ctx.drawImage(sprites, x, y, w, h);
   }
 }
