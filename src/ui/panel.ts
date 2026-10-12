@@ -57,6 +57,11 @@ export class ChainPanel {
     this.render();
   }
 
+  /** Name in the preset field, for file names. */
+  get presetName(): string {
+    return this.nameInput.value.trim();
+  }
+
   /** Applies a preset: view settings first, then the chain. */
   applyPreset(preset: Preset): void {
     this.host.setView({ ramp: preset.ramp, polarity: preset.polarity, color: structuredClone(preset.color) });

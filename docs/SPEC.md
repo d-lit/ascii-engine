@@ -324,6 +324,13 @@ export interface Renderer {
 - 0 аллокаций за кадр в установившемся режиме. CPU-часть pipeline проверяется в Node: `node tests/bench/pipeline-perf.ts` (время) и счётчик сборок через `--trace-gc` (аллокации, DECISIONS 013); рендер — в DevTools Performance.
 - Перед оптимизацией — замер. После — цифры до/после в отчёте.
 
+## 12.1 Экспорт
+
+- Текст: `exportText` поверх `resolveCellChar` — совпадает с экраном.
+- Видео в реальном времени (`export/video-recorder.ts`): `canvas.captureStream(fps)` + `MediaRecorder`; формат — первый поддерживаемый из MP4/H.264, WebM/VP9, WebM/VP8; битрейт `пиксели · fps · {0.08, 0.15, 0.3}` (low/medium/high). Во время записи пишется траектория курсора (`export/pointer-track.ts`).
+- Офлайн-рендер (`export/offline-render.ts`, DECISIONS 017): отдельный pipeline и холст целевого размера (`screen`, 1080×1080, 1080×1350, 1080×1920, 1920×1080), сетка вписана по центру (`layoutFrame`), шаг ровно `1/fps`, курсор из последней записи или отсутствует; WebCodecs + mediabunny, H.264/MP4 или VP9/WebM.
+- Холст рендера всегда чётного размера в физических пикселях (дополняется пикселем фона).
+
 ## 13. Каталог эффектов (начальный)
 
 **Cell**

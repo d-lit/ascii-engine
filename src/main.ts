@@ -20,11 +20,21 @@ import {
   GRADIENT_PALETTES,
   type ColorSettings,
 } from './pipeline/colorize.ts';
-import { Pipeline } from './pipeline/pipeline.ts';
+import { MAX_DT, Pipeline } from './pipeline/pipeline.ts';
+import { PointerTrack } from './export/pointer-track.ts';
+import { FRAME_SIZES, renderOffline, type FrameSizeName } from './export/offline-render.ts';
+import { chainToPreset } from './presets/preset.ts';
 import { MAX_STOPS } from './presets/preset.ts';
 import { parseHex } from './core/color.ts';
 import { Canvas2DRenderer } from './render/canvas2d.ts';
 import { exportText } from './render/export-text.ts';
+import {
+  bitrateFor,
+  CanvasRecorder,
+  supportedFormats,
+  videoFileName,
+  type VideoQuality,
+} from './export/video-recorder.ts';
 import { button, checkbox, gradientControl, row, selectOf } from './ui/controls.ts';
 import { DebugOverlay } from './ui/debug-overlay.ts';
 import { ChainPanel, type ViewSettings } from './ui/panel.ts';
@@ -160,6 +170,10 @@ function rebuild(): void {
 function frame(dt: number): void {
   if (source === null || ramp === null) return;
   input.tick(dt);
+  if (recorder.recording) {
+    // Pointer as this frame will see it, against the time the frame will have.
+    takeTrack.push(pipeline.ctx.time + Math.min(Math.max(dt, 0), MAX_DT) - takeStart, input.pointer);
+  }
   const work = pipeline.frame(dt);
   lastWork = work;
 
@@ -221,6 +235,8 @@ async function load(file: File): Promise<void> {
   overlay.visible = debugToggle.checked;
   copyButton.disabled = false;
   saveButton.disabled = false;
+  recordButton.disabled = false;
+  renderButton.disabled = false;
   colsRow.hidden = source.kind !== 'image';
   sourceCharsRow.hidden = source.kind !== 'text';
   safeRebuild();
@@ -416,6 +432,197 @@ exportBox.append(
   })),
   row('text', copyButton, saveButton),
 );
+
+// ---- export: video (real time) ----
+
+const VIDEO_FPS = ['60', '30'] as const;
+const VIDEO_QUALITY: readonly VideoQuality[] = ['high', 'medium', 'low'];
+const VIDEO_LENGTH = ['manual', '5 s', '10 s', '15 s', '30 s'] as const;
+
+const formats = typeof MediaRecorder === 'undefined' ? [] : supportedFormats((m) => MediaRecorder.isTypeSupported(m));
+const video = {
+  format: 0,
+  fps: 60,
+  quality: 'high' as VideoQuality,
+  seconds: 0,
+  fromStart: true,
+};
+const recorder = new CanvasRecorder();
+// Pointer path of the latest take, for replaying it offline.
+const takeTrack = new PointerTrack();
+let takeStart = 0;
+
+const formatSelect = document.createElement('select');
+formats.forEach((f, i) => formatSelect.add(new Option(f.label, String(i))));
+formatSelect.addEventListener('change', () => {
+  video.format = Number(formatSelect.value);
+});
+
+const recordButton = button('● record', () => void toggleRecording());
+recordButton.disabled = true;
+
+async function toggleRecording(): Promise<void> {
+  if (recorder.recording) {
+    await finishRecording();
+    return;
+  }
+  const format = formats[video.format];
+  if (format === undefined || source === null) return;
+  if (video.fromStart) pipeline.restart();
+  takeTrack.clear();
+  takeStart = pipeline.ctx.time;
+  recorder.start(canvas, {
+    format,
+    fps: video.fps,
+    bitsPerSecond: bitrateFor(canvas.width, canvas.height, video.fps, video.quality),
+  });
+  stage.classList.add('recording');
+  tickRecording();
+}
+
+async function finishRecording(): Promise<void> {
+  const format = formats[video.format];
+  stage.classList.remove('recording');
+  recordButton.textContent = '● record';
+  try {
+    const blob = await recorder.stop();
+    const name = videoFileName(source?.name ?? 'ascii', chainPanel.presetName, format?.ext ?? 'webm');
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = name;
+    link.click();
+    // Revoke later: the download may still be reading the blob.
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    setStatus(`saved ${name} · ${(blob.size / 1e6).toFixed(1)} MB`);
+  } catch (err) {
+    console.error(err);
+    setStatus(`recording failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/** Updates the button timer; stops on its own when a length is set. */
+function tickRecording(): void {
+  if (!recorder.recording) return;
+  const t = recorder.elapsed;
+  if (video.seconds > 0 && t >= video.seconds) {
+    void finishRecording();
+    return;
+  }
+  const s = Math.floor(t);
+  recordButton.textContent = `■ stop · ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  requestAnimationFrame(tickRecording);
+}
+
+const videoBox = section('video');
+if (formats.length === 0) {
+  const note = document.createElement('p');
+  note.className = 'hint';
+  note.textContent = 'This browser cannot record canvas video.';
+  videoBox.append(note);
+} else {
+  videoBox.append(
+    row('format', formatSelect),
+    row('fps', selectOf(VIDEO_FPS, '60', (v) => {
+      video.fps = Number(v);
+    })),
+    row('quality', selectOf(VIDEO_QUALITY, video.quality, (v) => {
+      video.quality = v;
+    })),
+    row('length', selectOf(VIDEO_LENGTH, 'manual', (v) => {
+      video.seconds = v === 'manual' ? 0 : parseInt(v, 10);
+    })),
+    row('from start', checkbox(video.fromStart, (on) => {
+      video.fromStart = on;
+    })),
+    row('record', recordButton),
+  );
+}
+
+// ---- export: video (offline, frame by frame) ----
+
+const offline = { size: 'screen' as FrameSizeName, replay: true };
+let rendering: AbortController | null = null;
+
+const renderButton = button('render', () => void toggleRender(), 'exact fps, any size; replays the last take');
+renderButton.disabled = true;
+const replayToggle = checkbox(offline.replay, (on) => {
+  offline.replay = on;
+});
+
+async function toggleRender(): Promise<void> {
+  if (rendering !== null) {
+    rendering.abort();
+    return;
+  }
+  if (source === null || field === null || recorder.recording) return;
+
+  const size = FRAME_SIZES[offline.size];
+  const width = size === null ? canvas.width : size[0];
+  const height = size === null ? canvas.height : size[1];
+  const replay = offline.replay && takeTrack.length > 1;
+  const seconds = replay ? takeTrack.duration : video.seconds > 0 ? video.seconds : 10;
+  const theme = THEMES[settings.polarity];
+
+  rendering = new AbortController();
+  renderButton.textContent = 'cancel · 0%';
+  try {
+    const { blob, ext } = await renderOffline(
+      {
+        source: field,
+        meta,
+        chain: chainToPreset(pipeline.chain),
+        lookup: getEffect,
+        color: structuredClone(settings.color),
+        theme,
+        ink: parseHex(theme.fg),
+        bg: parseHex(theme.bg),
+        rampChars: BUILTIN_RAMP_CHARS[settings.ramp],
+        family: FONT_FAMILY,
+        weight: 400,
+        useSourceChars: settings.useSourceChars,
+        quantizeMode: settings.quantizeMode,
+        width,
+        height,
+        fps: video.fps,
+        seconds,
+        bitsPerSecond: bitrateFor(width, height, video.fps, video.quality),
+        track: replay ? takeTrack : null,
+      },
+      (done, total) => {
+        renderButton.textContent = `cancel · ${Math.floor((done / total) * 100)}%`;
+      },
+      rendering.signal,
+    );
+    const name = videoFileName(source.name, chainPanel.presetName, ext);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = name;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    setStatus(`rendered ${name} · ${width}×${height} · ${seconds.toFixed(1)} s · ${(blob.size / 1e6).toFixed(1)} MB`);
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') setStatus('render cancelled');
+    else {
+      console.error(err);
+      setStatus(`render failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  } finally {
+    rendering = null;
+    renderButton.textContent = 'render';
+  }
+}
+
+if (typeof VideoEncoder !== 'undefined') {
+  videoBox.append(
+    row('size', selectOf(Object.keys(FRAME_SIZES) as FrameSizeName[], offline.size, (v) => {
+      offline.size = v;
+    })),
+    row('replay take', replayToggle),
+    row('offline', renderButton),
+  );
+}
 
 const status = document.createElement('p');
 status.className = 'status';

@@ -314,3 +314,8 @@ body {
   border: 1px solid var(--border);
   background: none;
 }
+
+#stage.recording {
+  outline: 2px solid #e5484d;
+  outline-offset: -2px;
+}
