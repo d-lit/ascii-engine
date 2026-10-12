@@ -20,6 +20,25 @@ export const FRAME_SIZES = {
 } as const;
 export type FrameSizeName = keyof typeof FRAME_SIZES;
 
+export interface OfflineFormat {
+  readonly ext: 'mp4' | 'webm';
+  readonly codec: 'avc' | 'vp9';
+  readonly label: string;
+}
+
+/** MP4 first: the format social media accepts everywhere. */
+export const OFFLINE_FORMATS: readonly OfflineFormat[] = [
+  { ext: 'mp4', codec: 'avc', label: 'MP4 · H.264' },
+  { ext: 'webm', codec: 'vp9', label: 'WebM · VP9' },
+];
+
+/** Which offline formats this browser can encode at this size and bitrate. */
+export async function probeOfflineFormats(width: number, height: number, bitsPerSecond: number): Promise<boolean[]> {
+  const mb = await import('./mux.ts');
+  const quality = new mb.Quality(bitsPerSecond);
+  return Promise.all(OFFLINE_FORMATS.map((f) => mb.canEncodeVideo(f.codec, { width, height, quality })));
+}
+
 export interface FrameLayout {
   cellW: number;
   cellH: number;
@@ -59,6 +78,7 @@ export interface OfflineJob {
   fps: number;
   seconds: number;
   bitsPerSecond: number;
+  format: OfflineFormat;
   /** Pointer path to replay; null = no pointer (outside the picture). */
   track: PointerTrack | null;
 }
@@ -81,12 +101,13 @@ export async function renderOffline(job: OfflineJob, onProgress: ProgressFn, sig
   const { width, height, fps } = job;
   const { cols, rows } = job.source;
 
-  // Codec: H.264 in MP4 for social media, VP9 in WebM where H.264 encoding is missing.
+  // The chosen format or nothing: no silent fallback to another container.
   const quality = new mb.Quality(job.bitsPerSecond);
-  const useMp4 = await mb.canEncodeVideo('avc', { width, height, quality });
-  if (!useMp4 && !(await mb.canEncodeVideo('vp9', { width, height, quality }))) {
-    throw new Error(`this browser cannot encode ${width}×${height} video`);
+  const { codec, ext } = job.format;
+  if (!(await mb.canEncodeVideo(codec, { width, height, quality }))) {
+    throw new Error(`this browser cannot encode ${job.format.label} at ${width}×${height}`);
   }
+  const useMp4 = ext === 'mp4';
 
   // Frame canvas and compositor at the target size.
   const layout = layoutFrame(cols, rows, job.meta.cellAspect, width, height);
@@ -115,7 +136,7 @@ export async function renderOffline(job: OfflineJob, onProgress: ProgressFn, sig
     format: useMp4 ? new mb.Mp4OutputFormat({ fastStart: 'in-memory' }) : new mb.WebMOutputFormat(),
     target,
   });
-  const videoSource = new mb.CanvasSource(canvas, { codec: useMp4 ? 'avc' : 'vp9', quality });
+  const videoSource = new mb.CanvasSource(canvas, { codec, quality });
   output.addVideoTrack(videoSource, { frameRate: fps });
   await output.start();
 
@@ -151,5 +172,5 @@ export async function renderOffline(job: OfflineJob, onProgress: ProgressFn, sig
 
   const buffer = target.buffer;
   if (buffer === null) throw new Error('renderOffline: encoder produced no data');
-  return { blob: new Blob([buffer], { type: useMp4 ? 'video/mp4' : 'video/webm' }), ext: useMp4 ? 'mp4' : 'webm' };
+  return { blob: new Blob([buffer], { type: useMp4 ? 'video/mp4' : 'video/webm' }), ext };
 }

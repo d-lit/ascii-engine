@@ -22,7 +22,13 @@ import {
 } from './pipeline/colorize.ts';
 import { MAX_DT, Pipeline } from './pipeline/pipeline.ts';
 import { PointerTrack } from './export/pointer-track.ts';
-import { FRAME_SIZES, renderOffline, type FrameSizeName } from './export/offline-render.ts';
+import {
+  FRAME_SIZES,
+  OFFLINE_FORMATS,
+  probeOfflineFormats,
+  renderOffline,
+  type FrameSizeName,
+} from './export/offline-render.ts';
 import { chainToPreset } from './presets/preset.ts';
 import { MAX_STOPS } from './presets/preset.ts';
 import { parseHex } from './core/color.ts';
@@ -38,6 +44,7 @@ import {
 import { button, checkbox, gradientControl, row, selectOf } from './ui/controls.ts';
 import { DebugOverlay } from './ui/debug-overlay.ts';
 import { ChainPanel, type ViewSettings } from './ui/panel.ts';
+import { makePanelResizable } from './ui/panel-resize.ts';
 
 const CELL_ASPECT = 0.55;
 const FONT_FAMILY = "ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
@@ -77,6 +84,7 @@ function el<T extends HTMLElement>(selector: string): T {
 const canvas = el<HTMLCanvasElement>('#view');
 const stage = el<HTMLElement>('#stage');
 const panel = el<HTMLElement>('#panel');
+makePanelResizable(el<HTMLElement>('#app'), panel, 380);
 
 const THEMES = {
   'light-on-dark': { bg: '#0b0b0d', fg: '#e8e6e3' },
@@ -160,6 +168,8 @@ function rebuild(): void {
   if (next !== field) pipeline.setSource(next, meta);
   field = next;
 
+  // Offline formats at screen size depend on the canvas, which may just have changed.
+  if (offline.size === 'screen') void refreshOfflineFormats();
   overlay.setInfo(`${next.cols}×${next.rows} · cell ${font.cellW}×${font.cellH}`);
   setStatus(`${source.name} · ${next.cols}×${next.rows}`);
   loop.start();
@@ -514,24 +524,42 @@ function tickRecording(): void {
   requestAnimationFrame(tickRecording);
 }
 
+// Video section: shared settings, then live recording, then offline render,
+// each with its own format list (they use different encoders).
 const videoBox = section('video');
+
+function subhead(text: string): HTMLElement {
+  const h = document.createElement('h4');
+  h.textContent = text;
+  return h;
+}
+
+function hint(text: string): HTMLElement {
+  const p = document.createElement('p');
+  p.className = 'hint';
+  p.textContent = text;
+  return p;
+}
+
+videoBox.append(
+  row('fps', selectOf(VIDEO_FPS, '60', (v) => {
+    video.fps = Number(v);
+    void refreshOfflineFormats();
+  })),
+  row('quality', selectOf(VIDEO_QUALITY, video.quality, (v) => {
+    video.quality = v;
+    void refreshOfflineFormats();
+  })),
+  row('length', selectOf(VIDEO_LENGTH, 'manual', (v) => {
+    video.seconds = v === 'manual' ? 0 : parseInt(v, 10);
+  })),
+  subhead('record · live, with cursor'),
+);
 if (formats.length === 0) {
-  const note = document.createElement('p');
-  note.className = 'hint';
-  note.textContent = 'This browser cannot record canvas video.';
-  videoBox.append(note);
+  videoBox.append(hint('This browser cannot record canvas video.'));
 } else {
   videoBox.append(
     row('format', formatSelect),
-    row('fps', selectOf(VIDEO_FPS, '60', (v) => {
-      video.fps = Number(v);
-    })),
-    row('quality', selectOf(VIDEO_QUALITY, video.quality, (v) => {
-      video.quality = v;
-    })),
-    row('length', selectOf(VIDEO_LENGTH, 'manual', (v) => {
-      video.seconds = v === 'manual' ? 0 : parseInt(v, 10);
-    })),
     row('from start', checkbox(video.fromStart, (on) => {
       video.fromStart = on;
     })),
@@ -541,7 +569,43 @@ if (formats.length === 0) {
 
 // ---- export: video (offline, frame by frame) ----
 
-const offline = { size: 'screen' as FrameSizeName, replay: true };
+const offline = { size: 'screen' as FrameSizeName, replay: true, format: 0 };
+
+// Offline format list, re-probed when size, fps or quality change: whether
+// H.264 encodes depends on all three. Unsupported entries stay visible.
+const offlineFormatSelect = document.createElement('select');
+OFFLINE_FORMATS.forEach((f, i) => offlineFormatSelect.add(new Option(f.label, String(i))));
+offlineFormatSelect.addEventListener('change', () => {
+  offline.format = Number(offlineFormatSelect.value);
+});
+let probeId = 0;
+
+function offlineSize(): [number, number] {
+  const size = FRAME_SIZES[offline.size];
+  return size === null ? [canvas.width, canvas.height] : [size[0], size[1]];
+}
+
+async function refreshOfflineFormats(): Promise<void> {
+  if (typeof VideoEncoder === 'undefined') return;
+  const id = ++probeId;
+  const [w, h] = offlineSize();
+  const ok = await probeOfflineFormats(w, h, bitrateFor(w, h, video.fps, video.quality));
+  if (id !== probeId) return; // a newer probe superseded this one
+  OFFLINE_FORMATS.forEach((f, i) => {
+    const option = offlineFormatSelect.options[i];
+    if (option === undefined) return;
+    option.disabled = ok[i] !== true;
+    option.textContent = ok[i] === true ? f.label : `${f.label} — not supported here`;
+  });
+  // Keep the choice if it still works, otherwise move to the first that does.
+  if (ok[offline.format] !== true) {
+    const first = ok.indexOf(true);
+    if (first >= 0) {
+      offline.format = first;
+      offlineFormatSelect.value = String(first);
+    }
+  }
+}
 let rendering: AbortController | null = null;
 
 const renderButton = button('render', () => void toggleRender(), 'exact fps, any size; replays the last take');
@@ -557,9 +621,9 @@ async function toggleRender(): Promise<void> {
   }
   if (source === null || field === null || recorder.recording) return;
 
-  const size = FRAME_SIZES[offline.size];
-  const width = size === null ? canvas.width : size[0];
-  const height = size === null ? canvas.height : size[1];
+  const [width, height] = offlineSize();
+  const format = OFFLINE_FORMATS[offline.format];
+  if (format === undefined) return;
   const replay = offline.replay && takeTrack.length > 1;
   const seconds = replay ? takeTrack.duration : video.seconds > 0 ? video.seconds : 10;
   const theme = THEMES[settings.polarity];
@@ -587,6 +651,7 @@ async function toggleRender(): Promise<void> {
         fps: video.fps,
         seconds,
         bitsPerSecond: bitrateFor(width, height, video.fps, video.quality),
+        format,
         track: replay ? takeTrack : null,
       },
       (done, total) => {
@@ -614,14 +679,20 @@ async function toggleRender(): Promise<void> {
   }
 }
 
-if (typeof VideoEncoder !== 'undefined') {
+videoBox.append(subhead('render · offline, exact fps'));
+if (typeof VideoEncoder === 'undefined') {
+  videoBox.append(hint('This browser has no WebCodecs: offline render is unavailable.'));
+} else {
   videoBox.append(
+    row('format', offlineFormatSelect),
     row('size', selectOf(Object.keys(FRAME_SIZES) as FrameSizeName[], offline.size, (v) => {
       offline.size = v;
+      void refreshOfflineFormats();
     })),
     row('replay take', replayToggle),
-    row('offline', renderButton),
+    row('render', renderButton),
   );
+  void refreshOfflineFormats();
 }
 
 const status = document.createElement('p');

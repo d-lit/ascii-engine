@@ -7,7 +7,7 @@
   --accent: #7dd3a0;
 
   --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-  --panel-w: 320px;
+  --panel-w: 380px;
 
   color-scheme: dark;
   font: 13px/1.4 var(--mono);
@@ -89,7 +89,7 @@ body {
 }
 
 #panel .row > span {
-  flex: 0 0 88px;
+  flex: 0 0 104px;
   color: var(--muted);
 }
 
@@ -352,4 +352,31 @@ body {
   background: var(--accent);
   color: var(--bg);
   border-color: var(--accent);
+}
+
+.panel-handle {
+  flex: 0 0 6px;
+  margin-right: -6px;
+  position: relative;
+  z-index: 2;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.panel-handle:hover,
+#app.resizing .panel-handle {
+  background: var(--accent);
+  opacity: 0.4;
+}
+
+#app.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+#panel h4 {
+  margin: 14px 0 6px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
 }
