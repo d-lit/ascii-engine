@@ -21,6 +21,18 @@ describe('randomRange', () => {
 });
 
 describe('randomChain', () => {
+  it('places points at anchors and free spots, not only centre and pointer', () => {
+    const points = new Set<string>();
+    for (let seed = 0; seed < 300; seed++) {
+      for (const e of randomChain(effects, seed)) {
+        const c = e.params.center;
+        if (c !== undefined) points.add(JSON.stringify(c));
+      }
+    }
+    expect(points.has('"pointer"')).toBe(true);
+    expect([...points].filter((p) => p.startsWith('{')).length).toBeGreaterThan(9);
+  });
+
   it('is deterministic per seed and varies between seeds', () => {
     expect(randomChain(effects, 7)).toEqual(randomChain(effects, 7));
     const ids = new Set(Array.from({ length: 20 }, (_, s) => randomChain(effects, s).map((e) => e.effect).join()));

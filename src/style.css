@@ -319,3 +319,37 @@ body {
   outline: 2px solid #e5484d;
   outline-offset: -2px;
 }
+
+#panel .point-head {
+  align-items: center;
+}
+
+#panel .point-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 14px);
+  grid-template-rows: repeat(3, 14px);
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+#panel .point-anchor {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: none;
+  border-radius: 2px;
+  background: var(--border);
+}
+
+#panel .point-anchor:hover {
+  background: var(--muted);
+}
+
+#panel .point-anchor.on,
+#panel button.on {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}

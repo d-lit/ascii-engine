@@ -108,6 +108,22 @@ describe('validatePreset', () => {
   });
 });
 
+describe('point values', () => {
+  it('accept anchors and positions off the edge, reject beyond -0.5..1.5', () => {
+    const chain = [
+      { effect: 'ripple', params: { center: { x: 0, y: 1 } } },
+      { effect: 'swirl', params: { center: { x: -0.5, y: 1.5 } } },
+      { effect: 'lens', params: { center: { x: 2, y: 0.5 } } },
+    ];
+    const { preset, warnings } = validatePreset({ version: 1, chain }, lookup);
+    expect(preset.chain[0]!.params.center).toEqual({ x: 0, y: 1 });
+    expect(preset.chain[1]!.params.center).toEqual({ x: -0.5, y: 1.5 });
+    expect(preset.chain[2]!.params.center).toBeUndefined();
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('center');
+  });
+});
+
 describe('colour block', () => {
   const stops = [
     { pos: 0, color: '#000' },

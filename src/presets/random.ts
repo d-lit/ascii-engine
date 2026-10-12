@@ -1,7 +1,14 @@
 import { createRand } from '../core/prng.ts';
 import type { AnyEffectDef } from '../effects/types.ts';
 import type { MaskSpec } from '../pipeline/mask.ts';
-import type { LfoShape, NumberSpec, ParamInput, ParamSpec, ParamValue } from '../pipeline/params.ts';
+import type {
+  LfoShape,
+  NumberSpec,
+  ParamInput,
+  ParamSpec,
+  ParamValue,
+  PointValue,
+} from '../pipeline/params.ts';
 import type { PresetEffect } from './preset.ts';
 
 export interface RandomChainOptions {
@@ -82,10 +89,22 @@ function randomParam(rand: Rand, spec: ParamSpec, modulate: boolean): ParamInput
     case 'boolean':
       return rand() < 0.8 ? spec.default : !spec.default;
     case 'point':
-      return rand() < 0.5 ? spec.default : rand() < 0.5 ? 'pointer' : 'center';
+      return randomPoint(rand, spec.default);
     case 'color':
       return undefined; // colour is not rendered yet (DECISIONS 015)
   }
+}
+
+const ANCHORS = [0, 0.5, 1] as const;
+
+/** Default, pointer, one of the nine anchors, or a free spot (sometimes off the edge). */
+function randomPoint(rand: Rand, fallback: PointValue): PointValue {
+  const r = rand();
+  if (r < 0.3) return fallback;
+  if (r < 0.5) return 'pointer';
+  if (r < 0.85) return { x: pick(rand, ANCHORS), y: pick(rand, ANCHORS) };
+  const free = (): number => Number(between(rand, -0.25, 1.25).toFixed(2));
+  return { x: free(), y: free() };
 }
 
 function randomMask(rand: Rand): MaskSpec {

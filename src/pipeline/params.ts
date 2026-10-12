@@ -3,6 +3,10 @@ import { resolveMod } from './modulation.ts';
 
 export type PointValue = Vec2 | 'pointer' | 'center';
 
+/** Range of normalized point coordinates; beyond 0..1 the point sits off the picture (SPEC 7.1). */
+export const POINT_MIN = -0.5;
+export const POINT_MAX = 1.5;
+
 export interface NumberSpec {
   type: 'number';
   min: number;
@@ -101,8 +105,8 @@ export function resolvePoint(value: PointValue, frame: ParamFrame, out: Vec2): v
     out.x = (frame.cols - 1) / 2;
     out.y = (frame.rows - 1) / 2;
   } else {
-    out.x = value.x * (frame.cols - 1);
-    out.y = value.y * (frame.rows - 1);
+    out.x = Math.min(Math.max(value.x, POINT_MIN), POINT_MAX) * (frame.cols - 1);
+    out.y = Math.min(Math.max(value.y, POINT_MIN), POINT_MAX) * (frame.rows - 1);
   }
 }
 

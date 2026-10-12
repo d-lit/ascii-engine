@@ -10,7 +10,14 @@ import {
 } from '../pipeline/colorize.ts';
 import { MASK_TYPES, type MaskSpec } from '../pipeline/mask.ts';
 import { resolveMod } from '../pipeline/modulation.ts';
-import type { ParamInput, ParamSpec, ParamValue, PointValue } from '../pipeline/params.ts';
+import {
+  POINT_MAX,
+  POINT_MIN,
+  type ParamInput,
+  type ParamSpec,
+  type ParamValue,
+  type PointValue,
+} from '../pipeline/params.ts';
 import type { ChainEntry, Pipeline } from '../pipeline/pipeline.ts';
 
 export const PRESET_VERSION = 1;
@@ -82,7 +89,8 @@ export function isParamValue(v: unknown): v is ParamValue {
 
 export function isPointValue(v: unknown): v is PointValue {
   if (v === 'pointer' || v === 'center') return true;
-  return isRecord(v) && finite(v.x) && finite(v.y);
+  const inRange = (n: unknown): boolean => finite(n) && n >= POINT_MIN && n <= POINT_MAX;
+  return isRecord(v) && inRange(v.x) && inRange(v.y);
 }
 
 function validParam(spec: ParamSpec, v: unknown): boolean {

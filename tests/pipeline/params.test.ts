@@ -40,6 +40,14 @@ describe('resolveParams', () => {
     expect(bag.center).toEqual({ x: 10, y: 0 });
   });
 
+  it('accepts positions off the picture and clamps beyond -0.5..1.5', () => {
+    const bag = createParamBag(schema);
+    resolveParams(schema, keys, { center: { x: -0.5, y: 1.5 } }, frame, bag, 0);
+    expect(bag.center).toEqual({ x: -5, y: 6 });
+    resolveParams(schema, keys, { center: { x: -3, y: 9 } }, frame, bag, 0);
+    expect(bag.center).toEqual({ x: -5, y: 6 });
+  });
+
   it('mutates point objects in place instead of allocating', () => {
     const bag = createParamBag(schema);
     const point = bag.center;
