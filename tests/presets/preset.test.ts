@@ -182,6 +182,19 @@ describe('colour block', () => {
     expect(warnings.some((w) => w.includes('color mode'))).toBe(true);
   });
 
+  it('keeps plates and the stops they need, drops plates: none', () => {
+    const raw = { version: 1, color: { mode: 'mono', stops, plates: { mode: 'gradient', opacity: 0.4 } } };
+    const { preset, warnings } = validatePreset(raw, lookup);
+    expect(warnings).toEqual([]);
+    expect(preset.color.plates).toEqual({ mode: 'gradient', opacity: 0.4 });
+    const saved = JSON.parse(serializePreset(preset)).color;
+    expect(saved).toEqual({ mode: 'mono', stops, plates: { mode: 'gradient', opacity: 0.4 } });
+    const none = validatePreset({ version: 1, color: { mode: 'mono', plates: { mode: 'none', opacity: 1 } } }, lookup);
+    expect(none.preset.color.plates).toBeUndefined();
+    const bad = validatePreset({ version: 1, color: { mode: 'mono', plates: { mode: 'tiles', opacity: 2 } } }, lookup);
+    expect(bad.warnings.some((w) => w.includes('plates'))).toBe(true);
+  });
+
   it('defaults to mono when the block is missing', () => {
     expect(validatePreset({}, lookup).preset.color).toEqual({ mode: 'mono', stops: DEFAULT_STOPS });
   });

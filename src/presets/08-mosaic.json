@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "name": "Mosaic",
+  "ramp": "classic",
+  "polarity": "light-on-dark",
+  "color": {
+    "mode": "source",
+    "plates": { "mode": "source", "opacity": 0.55 }
+  },
+  "chain": [
+    {
+      "effect": "pulse",
+      "params": { "shape": "radial", "center": "pointer", "frequency": 0.6, "amount": 0.25, "wavelength": 30, "radius": 35 }
+    },
+    {
+      "effect": "glow",
+      "params": { "center": "pointer", "color": "#ffffff", "radius": 14, "strength": 0.5, "falloff": 2 }
+    }
+  ]
+}

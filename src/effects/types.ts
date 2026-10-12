@@ -14,6 +14,11 @@ export interface CellRef {
   g: number;
   b: number;
   char: number;
+  /** Background plate 0..255 (alpha in `pa`); meaningful in the post stage only. */
+  pr: number;
+  pg: number;
+  pb: number;
+  pa: number;
 }
 
 export type CellFn = (cell: CellRef, x: number, y: number, ctx: FrameContext) => void;
@@ -42,6 +47,11 @@ export interface EffectDef<P extends ParamSchema> {
    * them (DECISIONS 016). Their lum changes no longer affect the colour.
    */
   writesColor?: boolean;
+  /**
+   * Writes the background plate (pr, pg, pb, pa): runs in the post stage like
+   * writesColor, and makes the pipeline keep a plate channel (DECISIONS 021).
+   */
+  writesPlate?: boolean;
   create(params: ResolvedParams<P>): EffectInstance;
 }
 
@@ -52,6 +62,7 @@ export interface AnyEffectDef {
   readonly kind: EffectKind;
   readonly params: ParamSchema;
   readonly writesColor: boolean;
+  readonly writesPlate: boolean;
   /** `params` is a live bag the engine re-resolves every frame. */
   create(params: ParamBag): EffectInstance;
 }
@@ -67,6 +78,7 @@ export function defineEffect<const P extends ParamSchema>(def: EffectDef<P>): An
     kind: def.kind,
     params: def.params,
     writesColor: def.writesColor === true,
+    writesPlate: def.writesPlate === true,
     // The engine builds the bag from this very schema (createParamBag), so the
     // shape matches ResolvedParams<P>; TS cannot see that through the erasure.
     create: (params) => def.create(params as ResolvedParams<P>),

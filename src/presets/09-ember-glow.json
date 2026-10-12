@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "name": "Ember glow",
+  "ramp": "long",
+  "polarity": "light-on-dark",
+  "color": {
+    "mode": "gradient",
+    "stops": [
+      { "pos": 0, "color": "#120400" },
+      { "pos": 0.35, "color": "#8a1c06" },
+      { "pos": 0.7, "color": "#f07f13" },
+      { "pos": 1, "color": "#fff3b0" }
+    ],
+    "plates": { "mode": "gradient", "opacity": 0.25 }
+  },
+  "chain": [
+    { "effect": "liquid", "params": { "amplitude": 1.2, "scale": 28, "speed": 0.18 } },
+    {
+      "effect": "glow",
+      "params": {
+        "center": "pointer",
+        "color": "#ff6a1a",
+        "radius": { "lfo": "sine", "freq": 0.4, "min": 12, "max": 22 },
+        "strength": 0.9,
+        "falloff": 1.6
+      }
+    }
+  ]
+}

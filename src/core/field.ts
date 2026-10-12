@@ -23,6 +23,8 @@ export interface WorkBuffer {
   lum: Float32Array;
   alpha: Float32Array;
   color: Uint8ClampedArray | null;
+  /** Cell background plate, RGBA per cell; null when no plates are used (DECISIONS 021). */
+  plate: Uint8ClampedArray | null;
   char: Uint16Array;
   charOverride: Uint16Array;
 }
@@ -65,6 +67,7 @@ export function createWorkBuffer(cols: number, rows: number, opts: FieldOptions 
     lum: new Float32Array(n),
     alpha: new Float32Array(n),
     color: opts.color === true ? new Uint8ClampedArray(n * 3) : null,
+    plate: null,
     char: new Uint16Array(n),
     charOverride: new Uint16Array(n),
   };

@@ -16,9 +16,26 @@ export interface GradientStop {
  * - `source`: the picture's own colours (theme ink for colourless sources);
  * - `gradient`: `lum` after cell effects mapped through `stops`.
  */
+/**
+ * Cell background plates (DECISIONS 021): `source` — picture colours,
+ * `gradient` — the colour gradient by lum, `ink` — each cell's own ink.
+ * `opacity` 0..1 is multiplied by the cell alpha.
+ */
+export type PlateMode = 'none' | 'source' | 'gradient' | 'ink';
+export const PLATE_MODES: readonly PlateMode[] = ['none', 'source', 'gradient', 'ink'];
+
+export interface PlateSettings {
+  mode: PlateMode;
+  opacity: number;
+}
+
+export const DEFAULT_PLATES: PlateSettings = { mode: 'none', opacity: 0.5 };
+
 export interface ColorSettings {
   mode: ColorMode;
   stops: GradientStop[];
+  /** Omitted = no plates. */
+  plates?: PlateSettings;
 }
 
 export const DEFAULT_STOPS: readonly GradientStop[] = [
@@ -132,3 +149,49 @@ export const GRADIENT_PALETTES: Readonly<Record<string, readonly GradientStop[]>
     { pos: 1, color: '#2ff7ff' },
   ],
 };
+
+/**
+ * Fills `work.plate` (which must exist) for this frame. Runs after colorize,
+ * so `ink` plates follow the final ink. Plate alpha = opacity x cell alpha.
+ */
+export function fillPlates(
+  work: WorkBuffer,
+  source: Readonly<Field>,
+  plates: PlateSettings,
+  ink: Rgb,
+  lut: Uint8Array,
+): void {
+  const plate = work.plate;
+  if (plate === null) return;
+  const n = work.cols * work.rows;
+  if (plates.mode === 'none') {
+    plate.fill(0);
+    return;
+  }
+  const { lum, alpha, color } = work;
+  const opacity = Math.min(Math.max(plates.opacity, 0), 1) * 255;
+  const src = source.color;
+  for (let i = 0; i < n; i++) {
+    let r = ink[0];
+    let g = ink[1];
+    let b = ink[2];
+    if (plates.mode === 'source' && src !== null) {
+      r = src[i * 3]!;
+      g = src[i * 3 + 1]!;
+      b = src[i * 3 + 2]!;
+    } else if (plates.mode === 'gradient') {
+      const k = (Math.min(Math.max(lum[i]!, 0), 1) * 255 + 0.5) | 0;
+      r = lut[k * 3]!;
+      g = lut[k * 3 + 1]!;
+      b = lut[k * 3 + 2]!;
+    } else if (plates.mode === 'ink' && color !== null) {
+      r = color[i * 3]!;
+      g = color[i * 3 + 1]!;
+      b = color[i * 3 + 2]!;
+    }
+    plate[i * 4] = r;
+    plate[i * 4 + 1] = g;
+    plate[i * 4 + 2] = b;
+    plate[i * 4 + 3] = opacity * Math.min(Math.max(alpha[i]!, 0), 1);
+  }
+}

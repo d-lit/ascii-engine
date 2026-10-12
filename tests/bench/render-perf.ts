@@ -100,6 +100,8 @@ const cases: Array<[string, AnyEffectDef[], ColorSettings?]> = [
   ['grad wave', [wave], GRADIENT],
   ['grad all four', [wave, pulse, erosion, decode], GRADIENT],
   ['grad ripple+liquid', [ripple, liquid], GRADIENT],
+  ['plates static', [], { mode: 'mono', stops: [], plates: { mode: 'source', opacity: 0.6 } }],
+  ['plates grad wave', [wave], { ...GRADIENT, plates: { mode: 'gradient', opacity: 0.6 } }],
 ];
 
 const only = process.env.ONLY;

@@ -5,6 +5,7 @@ import { isHexColor } from '../core/color.ts';
 import {
   COLOR_MODES,
   DEFAULT_STOPS,
+  PLATE_MODES,
   type ColorSettings,
   type GradientStop,
 } from '../pipeline/colorize.ts';
@@ -211,6 +212,14 @@ function validateColor(raw: unknown, warn: (msg: string) => void): ColorSettings
     if (ok) color.stops = structuredClone(raw.stops as GradientStop[]);
     else warn(`bad gradient stops ${show(raw.stops)}, using default gradient`);
   }
+  if (raw.plates !== undefined) {
+    const p = raw.plates;
+    if (isRecord(p) && oneOf(p.mode, PLATE_MODES) && finite(p.opacity) && p.opacity >= 0 && p.opacity <= 1) {
+      if (p.mode !== 'none') color.plates = { mode: p.mode, opacity: p.opacity };
+    } else {
+      warn(`bad plates ${show(p)}, using none`);
+    }
+  }
   return color;
 }
 
@@ -320,6 +329,15 @@ export function chainToPreset(chain: readonly ChainEntry[]): PresetEffect[] {
   );
 }
 
+/** Stops only for gradients (ink or plates), plates only when used. */
+function serializeColor(c: ColorSettings): Record<string, unknown> {
+  const plates = c.plates !== undefined && c.plates.mode !== 'none' ? c.plates : null;
+  const out: Record<string, unknown> = { mode: c.mode };
+  if (c.mode === 'gradient' || plates?.mode === 'gradient') out.stops = c.stops;
+  if (plates !== null) out.plates = plates;
+  return out;
+}
+
 /**
  * Serializes in the SPEC 8 shape. Optional fields with default values are
  * omitted so hand-edited presets stay short.
@@ -340,7 +358,7 @@ export function serializePreset(preset: Preset): string {
       ramp: preset.ramp,
       polarity: preset.polarity,
       // Stops only matter for the gradient mode; keep files short otherwise.
-      color: preset.color.mode === 'gradient' ? preset.color : { mode: preset.color.mode },
+      color: serializeColor(preset.color),
       // Theme backdrop is the default: omitted to keep files short.
       ...(preset.backdrop.kind === 'theme' ? {} : { backdrop: preset.backdrop }),
       chain,

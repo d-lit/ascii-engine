@@ -19,6 +19,8 @@ import type {
 import {
   buildGradientLut,
   colorize,
+  fillPlates,
+  DEFAULT_PLATES,
   DEFAULT_STOPS,
   type ColorSettings,
 } from './colorize.ts';
@@ -111,8 +113,20 @@ export class Pipeline {
   private ink: Rgb = [255, 255, 255];
   private lut = buildGradientLut(DEFAULT_STOPS);
   private needColor = false;
+  private needPlate = false;
   private readonly at: Vec2 = { x: 0, y: 0 };
-  private readonly cell: CellRef = { lum: 0, alpha: 0, r: 0, g: 0, b: 0, char: 0 };
+  private readonly cell: CellRef = {
+    lum: 0,
+    alpha: 0,
+    r: 0,
+    g: 0,
+    b: 0,
+    char: 0,
+    pr: 0,
+    pg: 0,
+    pb: 0,
+    pa: 0,
+  };
 
   constructor(source: Field, meta: FieldMeta, pointer: Pointer, seed = DEFAULT_SEED) {
     this.source = source;
@@ -260,8 +274,11 @@ export class Pipeline {
     if (this.cellFns.length > 0) this.runCells(this.cellFns, this.cellMix, this.cellMasks);
     const t3 = performance.now();
 
-    if (this.needColor) {
+    if (this.needColor || this.needPlate) {
       colorize(this.work, this.source, this.color.mode, this.ink, this.lut);
+      if (this.needPlate) {
+        fillPlates(this.work, this.source, this.color.plates ?? DEFAULT_PLATES, this.ink, this.lut);
+      }
       if (this.postFns.length > 0) this.runCells(this.postFns, this.postMix, this.postMasks);
     }
     const t4 = performance.now();
@@ -320,7 +337,7 @@ export class Pipeline {
       if (!entry.enabled) continue;
       const inst = entry.instance;
       const mask = this.state.get(entry)?.maskBuf ?? null;
-      if (inst.kind === 'cell' && entry.def.writesColor) {
+      if (inst.kind === 'cell' && (entry.def.writesColor || entry.def.writesPlate)) {
         postEntries.push(entry);
         postFns.push(inst.apply);
         postMasks.push(mask);
@@ -352,6 +369,12 @@ export class Pipeline {
     this.needColor = this.color.mode !== 'mono' || postFns.length > 0;
     if (this.needColor !== (this.work.color !== null)) {
       this.work.color = this.needColor ? new Uint8ClampedArray(this.work.cols * this.work.rows * 3) : null;
+    }
+    // Plate channel on demand too (DECISIONS 021).
+    this.needPlate =
+      (this.color.plates?.mode ?? 'none') !== 'none' || postEntries.some((e) => e.def.writesPlate);
+    if (this.needPlate !== (this.work.plate !== null)) {
+      this.work.plate = this.needPlate ? new Uint8ClampedArray(this.work.cols * this.work.rows * 4) : null;
     }
   }
 
@@ -445,7 +468,7 @@ export class Pipeline {
     cellMasks: ReadonlyArray<Float32Array | null>,
   ): void {
     const { work, cell, ctx } = this;
-    const { lum, alpha, color, charOverride, cols, rows } = work;
+    const { lum, alpha, color, plate, charOverride, cols, rows } = work;
     const nFns = cellFns.length;
 
     // Hot loop: indices bounded by cols*rows, fn index by nFns.
@@ -459,6 +482,12 @@ export class Pipeline {
           cell.r = color[i * 3]!;
           cell.g = color[i * 3 + 1]!;
           cell.b = color[i * 3 + 2]!;
+        }
+        if (plate !== null) {
+          cell.pr = plate[i * 4]!;
+          cell.pg = plate[i * 4 + 1]!;
+          cell.pb = plate[i * 4 + 2]!;
+          cell.pa = plate[i * 4 + 3]!;
         }
 
         for (let f = 0; f < nFns; f++) {
@@ -477,7 +506,15 @@ export class Pipeline {
           const bg = cell.g;
           const bb = cell.b;
           const bc = cell.char;
+          const bpr = cell.pr;
+          const bpg = cell.pg;
+          const bpb = cell.pb;
+          const bpa = cell.pa;
           cellFns[f]!(cell, x, y, ctx);
+          cell.pr = bpr + (cell.pr - bpr) * w;
+          cell.pg = bpg + (cell.pg - bpg) * w;
+          cell.pb = bpb + (cell.pb - bpb) * w;
+          cell.pa = bpa + (cell.pa - bpa) * w;
           cell.lum = bl + (cell.lum - bl) * w;
           cell.alpha = ba + (cell.alpha - ba) * w;
           cell.r = br + (cell.r - br) * w;
@@ -493,6 +530,12 @@ export class Pipeline {
           color[i * 3] = cell.r;
           color[i * 3 + 1] = cell.g;
           color[i * 3 + 2] = cell.b;
+        }
+        if (plate !== null) {
+          plate[i * 4] = cell.pr;
+          plate[i * 4 + 1] = cell.pg;
+          plate[i * 4 + 2] = cell.pb;
+          plate[i * 4 + 3] = cell.pa;
         }
       }
     }

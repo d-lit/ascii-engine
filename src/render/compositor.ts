@@ -33,6 +33,28 @@ const SHIFT_G = LITTLE_ENDIAN ? 8 : 16;
 const SHIFT_B = LITTLE_ENDIAN ? 16 : 8;
 const SHIFT_A = LITTLE_ENDIAN ? 24 : 0;
 
+// Plated path: glyph alpha is quantized to this many levels per cell, so a
+// redrawn cell builds a small "ink over plate" palette instead of blending
+// every pixel (DECISIONS 021).
+const PLATE_LEVELS = 32;
+const PLATE_SHIFT = 11; // (coverage 0..255 * scale 0..256) >> 11 -> 0..32
+
+// "Ink over plate" weights depend only on the plate alpha (0..255) and the
+// glyph level (0..PLATE_LEVELS): one shared table, no division per cell.
+// Per entry: ink weight, plate weight, output alpha (0..255).
+const OVER = new Float32Array(256 * (PLATE_LEVELS + 1) * 3);
+for (let pa = 0; pa < 256; pa++) {
+  for (let l = 0; l <= PLATE_LEVELS; l++) {
+    const a = (l * 255) / PLATE_LEVELS;
+    const under = (pa * (255 - a)) / 255;
+    const outA = a + under;
+    const k = (pa * (PLATE_LEVELS + 1) + l) * 3;
+    OVER[k] = outA > 0 ? a / outA : 0;
+    OVER[k + 1] = outA > 0 ? under / outA : 0;
+    OVER[k + 2] = outA;
+  }
+}
+
 function packRgb(r: number, g: number, b: number): number {
   return (r << SHIFT_R) | (g << SHIFT_G) | (b << SHIFT_B);
 }
@@ -64,6 +86,11 @@ export class Compositor {
   // Colour path (DECISIONS 015): per-cell ink change key, 5 bits per channel.
   private readonly prevInk: Int32Array;
   private lastColored = false;
+  // Plated path: plate change key (5 bits per colour channel, 4 bits alpha).
+  private readonly prevPlate: Int32Array;
+  private readonly platePalette = new Int32Array(PLATE_LEVELS + 1);
+  private readonly inkRgb = new Int32Array(3);
+  private lastPlated = false;
 
   constructor(cols: number, rows: number, cellW: number, cellH: number) {
     this.cols = cols;
@@ -77,6 +104,7 @@ export class Compositor {
     this.prevCode = new Uint16Array(cols * rows).fill(STALE);
     this.prevAlpha = new Uint16Array(cols * rows);
     this.prevInk = new Int32Array(cols * rows);
+    this.prevPlate = new Int32Array(cols * rows);
   }
 
   /** Theme ink for the mono path; every cell is redrawn on the next compose. */
@@ -84,6 +112,9 @@ export class Compositor {
     const rgb = packRgb(fg[0], fg[1], fg[2]);
     for (let a = 0; a < 256; a++) this.palette[a] = rgb | (a << SHIFT_A);
     this.palette[0] = 0; // canonical clear pixel, same as the colour path
+    this.inkRgb[0] = fg[0];
+    this.inkRgb[1] = fg[1];
+    this.inkRgb[2] = fg[2];
     this.invalidate();
   }
 
@@ -100,9 +131,15 @@ export class Compositor {
     masks: MaskSource,
   ): void {
     const colored = work.color !== null;
-    if (colored !== this.lastColored) {
+    const plated = work.plate !== null;
+    if (colored !== this.lastColored || plated !== this.lastPlated) {
       this.lastColored = colored;
+      this.lastPlated = plated;
       this.invalidate();
+    }
+    if (plated) {
+      this.composePlated(work, ramp, polarity, useSourceChars, mode, masks);
+      return;
     }
     const { cols, rows, cellW, cellH, width, px, palette, prevCode, prevAlpha, prevInk } = this;
     const alpha = work.alpha;
@@ -160,6 +197,88 @@ export class Compositor {
               const m = mask[src]!;
               px[dst + c] = m === 0 ? 0 : rgb | (((m * scale) >> 8) << SHIFT_A);
             }
+          }
+        }
+      }
+    }
+
+    this.dirtyTop = top < 0 ? 0 : top * cellH;
+    this.dirtyBottom = top < 0 ? 0 : (bottom + 1) * cellH;
+  }
+
+  /**
+   * Cells with background plates (DECISIONS 021): ink over plate, straight
+   * alpha. Uncovered pixels show the plate; a cell with neither glyph nor
+   * plate stays clear. Redrawn when glyph, alpha step, ink or plate change.
+   */
+  private composePlated(
+    work: WorkBuffer,
+    ramp: Ramp,
+    polarity: Polarity,
+    useSourceChars: boolean,
+    mode: QuantizeMode,
+    masks: MaskSource,
+  ): void {
+    const { cols, rows, cellW, cellH, width, px, prevCode, prevAlpha, prevInk, prevPlate } = this;
+    const alpha = work.alpha;
+    const color = work.color;
+    const plate = work.plate!; // checked by compose()
+    const pal = this.platePalette;
+    const tile = cellW * cellH;
+    let top = -1;
+    let bottom = -1;
+
+    // Hot loop: indices bounded by cols*rows, tile offsets by the mask size.
+    let i = 0;
+    for (let y = 0; y < rows; y++) {
+      const rowBase = y * cellH * width;
+      for (let x = 0; x < cols; x++, i++) {
+        const code = resolveCellChar(work, i, ramp, polarity, useSourceChars, mode);
+        const slot = code === 0 ? -1 : masks.slot(code);
+        const scale = slot < 0 ? 0 : alphaScale(alpha[i]!);
+        const key = scale === 0 ? 0 : code;
+        const ir = color === null ? this.inkRgb[0]! : color[i * 3]!;
+        const ig = color === null ? this.inkRgb[1]! : color[i * 3 + 1]!;
+        const ib = color === null ? this.inkRgb[2]! : color[i * 3 + 2]!;
+        const ink = scale === 0 ? 0 : ((ir >> 3) << 10) | ((ig >> 3) << 5) | (ib >> 3) | 0x8000;
+        const pr = plate[i * 4]!;
+        const pg = plate[i * 4 + 1]!;
+        const pb = plate[i * 4 + 2]!;
+        const pa = plate[i * 4 + 3]!;
+        const plateKey = pa === 0 ? 0 : ((pr >> 3) << 15) | ((pg >> 3) << 10) | ((pb >> 3) << 5) | (pa >> 4) | (1 << 20);
+        if (key === prevCode[i] && scale === prevAlpha[i] && ink === prevInk[i] && plateKey === prevPlate[i]) {
+          continue;
+        }
+        prevCode[i] = key;
+        prevAlpha[i] = scale;
+        prevInk[i] = ink;
+        prevPlate[i] = plateKey;
+        if (top < 0) top = y;
+        bottom = y;
+
+        let dst = rowBase + x * cellW;
+        const platePx = pa === 0 ? 0 : packRgb(pr, pg, pb) | (pa << SHIFT_A);
+        if (scale === 0) {
+          for (let r = 0; r < cellH; r++, dst += width) px.fill(platePx, dst, dst + cellW);
+          continue;
+        }
+
+        // Palette over glyph alpha levels: "over" with straight alpha, 0..255.
+        pal[0] = platePx;
+        let k = (pa * (PLATE_LEVELS + 1) + 1) * 3;
+        for (let l = 1; l <= PLATE_LEVELS; l++, k += 3) {
+          const wi = OVER[k]!;
+          const wp = OVER[k + 1]!;
+          const r = (ir * wi + pr * wp) | 0;
+          const g = (ig * wi + pg * wp) | 0;
+          const b = (ib * wi + pb * wp) | 0;
+          pal[l] = (r << SHIFT_R) | (g << SHIFT_G) | (b << SHIFT_B) | ((OVER[k + 2]! + 0.5) << SHIFT_A);
+        }
+        const mask = masks.data;
+        let src = slot * tile;
+        for (let r = 0; r < cellH; r++, dst += width) {
+          for (let c = 0; c < cellW; c++, src++) {
+            px[dst + c] = pal[(mask[src]! * scale + 1024) >> PLATE_SHIFT]!;
           }
         }
       }

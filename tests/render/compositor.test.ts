@@ -175,3 +175,43 @@ describe('Compositor colour path', () => {
     expect(pixel(c, 0, 0)).toEqual([...FG, 255]);
   });
 });
+
+describe('Compositor plated path', () => {
+  function plated(lums: number[], plates: number[][], alphas?: number[]): WorkBuffer {
+    const w = work(lums, alphas);
+    w.plate = new Uint8ClampedArray(plates.flat());
+    return w;
+  }
+
+  it('shows the plate where there is no ink, ink over it where covered', () => {
+    const c = setup(2);
+    const w = plated([0.5, 0], [[0, 0, 255, 255], [0, 255, 0, 128]]);
+    c.compose(w, ramp, 'light-on-dark', true, 'nearest-density', fakeMasks());
+    // '.': lit pixel is opaque ink, the rest is the plate.
+    expect(pixel(c, 0, 0)).toEqual([...FG, 255]);
+    expect(pixel(c, 1, 0)).toEqual([0, 0, 255, 255]);
+    // ' ' with a half plate: just the plate.
+    expect(pixel(c, 2, 0)).toEqual([0, 255, 0, 128]);
+  });
+
+  it('blends half-alpha ink over an opaque plate into an opaque pixel', () => {
+    const c = setup(1);
+    c.compose(plated([1], [[0, 0, 0, 255]], [0.5]), ramp, 'light-on-dark', true, 'nearest-density', fakeMasks());
+    const [r, g, b, a] = pixel(c, 0, 0);
+    expect(a).toBe(255);
+    expect(Math.abs(r! - FG[0] / 2)).toBeLessThanOrEqual(2);
+    expect(Math.abs(g! - FG[1] / 2)).toBeLessThanOrEqual(2);
+    expect(Math.abs(b! - FG[2] / 2)).toBeLessThanOrEqual(2);
+  });
+
+  it('stays clear without glyph and plate, redraws when only the plate changes', () => {
+    const c = setup(1);
+    const masks = fakeMasks();
+    const w = plated([0], [[0, 0, 0, 0]]);
+    c.compose(w, ramp, 'light-on-dark', true, 'nearest-density', masks);
+    expect(pixel(c, 0, 0)).toEqual(CLEAR);
+    w.plate!.set([255, 0, 0, 255]);
+    c.compose(w, ramp, 'light-on-dark', true, 'nearest-density', masks);
+    expect(pixel(c, 0, 0)).toEqual([255, 0, 0, 255]);
+  });
+});

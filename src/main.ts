@@ -16,7 +16,9 @@ import { registerBuiltinEffects } from './effects/builtin.ts';
 import { getEffect, listEffects } from './effects/registry.ts';
 import {
   COLOR_MODES,
+  DEFAULT_PLATES,
   DEFAULT_STOPS,
+  PLATE_MODES,
   GRADIENT_PALETTES,
   type ColorSettings,
 } from './pipeline/colorize.ts';
@@ -366,13 +368,37 @@ const colorModeSelect = selectOf(COLOR_MODES, settings.color.mode, (m) => {
   applyColor();
 });
 
+// Plates: cell backgrounds (DECISIONS 021). `gradient` plates share the stops.
+const platesBox = document.createElement('div');
+
+function renderPlates(): void {
+  const plates = settings.color.plates ?? { ...DEFAULT_PLATES };
+  const modeSelect = selectOf(PLATE_MODES, plates.mode, (m) => {
+    settings.color.plates = { ...plates, mode: m };
+    renderPlates();
+    renderGradient();
+    applyColor();
+  });
+  platesBox.replaceChildren(row('plates', modeSelect));
+  if (plates.mode === 'none') return;
+  platesBox.append(
+    row('plate opacity', ...slider(0, 1, 0.01, plates.opacity, (n) => {
+      plates.opacity = n;
+      settings.color.plates = plates;
+      applyColor();
+    })),
+  );
+}
+
 function renderGradient(): void {
   gradientBox.replaceChildren();
-  if (settings.color.mode !== 'gradient') return;
+  const used = settings.color.mode === 'gradient' || settings.color.plates?.mode === 'gradient';
+  if (!used) return;
   gradientBox.append(gradientControl(settings.color.stops, GRADIENT_PALETTES, MAX_STOPS, applyColor));
 }
 
-colorBox.append(row('mode', colorModeSelect), gradientBox);
+colorBox.append(row('mode', colorModeSelect), platesBox, gradientBox);
+renderPlates();
 renderGradient();
 
 // ---- panel: background (DECISIONS 020) ----
@@ -510,6 +536,7 @@ function setView(next: ViewSettings): void {
   rampSelect.value = next.ramp;
   polaritySelect.value = next.polarity;
   colorModeSelect.value = next.color.mode;
+  renderPlates();
   stage.dataset.polarity = next.polarity;
   renderGradient();
   applyColor();
