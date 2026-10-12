@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "name": "Screensaver",
+  "ramp": "blocks",
+  "polarity": "light-on-dark",
+  "color": {
+    "mode": "gradient",
+    "stops": [
+      { "pos": 0, "color": "#14002e" },
+      { "pos": 0.33, "color": "#7a00ff" },
+      { "pos": 0.66, "color": "#ff2fb3" },
+      { "pos": 1, "color": "#2ff7ff" }
+    ]
+  },
+  "chain": [
+    {
+      "effect": "pulse",
+      "params": {
+        "shape": "radial",
+        "center": { "path": { "kind": "bounce", "start": { "x": 0.2, "y": 0.3 }, "speed": 0.12, "angle": 35 } },
+        "frequency": 0.7,
+        "amount": 0.3,
+        "wavelength": 18,
+        "radius": 30
+      }
+    },
+    {
+      "effect": "glow",
+      "params": {
+        "center": { "path": { "kind": "bounce", "start": { "x": 0.2, "y": 0.3 }, "speed": 0.12, "angle": 35 } },
+        "color": "#ff2fb3",
+        "radius": 14,
+        "strength": 0.7,
+        "falloff": 1.8
+      }
+    }
+  ]
+}

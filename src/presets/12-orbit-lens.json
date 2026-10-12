@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "name": "Orbit lens",
+  "ramp": "long",
+  "polarity": "light-on-dark",
+  "color": {
+    "mode": "gradient",
+    "stops": [
+      { "pos": 0, "color": "#020b1f" },
+      { "pos": 0.5, "color": "#0b6e99" },
+      { "pos": 1, "color": "#b8f3ff" }
+    ]
+  },
+  "chain": [
+    {
+      "effect": "swirl",
+      "params": { "center": "center", "angle": 90, "radius": 60, "wobble": 0.1 }
+    },
+    {
+      "effect": "lens",
+      "params": {
+        "center": { "path": { "kind": "orbit", "center": { "x": 0.5, "y": 0.5 }, "radius": 0.25, "speed": 0.08 } },
+        "radius": 16,
+        "strength": 0.55
+      }
+    },
+    {
+      "effect": "ripple",
+      "params": {
+        "center": { "path": { "kind": "orbit", "center": { "x": 0.5, "y": 0.5 }, "radius": 0.25, "speed": 0.08, "phase": 0.5 } },
+        "amplitude": 1.2,
+        "wavelength": 10,
+        "speed": 20,
+        "decay": 25
+      }
+    }
+  ]
+}

@@ -97,12 +97,20 @@ function randomParam(rand: Rand, spec: ParamSpec, modulate: boolean): ParamInput
 
 const ANCHORS = [0, 0.5, 1] as const;
 
-/** Default, pointer, one of the nine anchors, or a free spot (sometimes off the edge). */
+/** Default, pointer, one of the nine anchors, a slow orbit or wander, or a free spot (sometimes off the edge). */
 function randomPoint(rand: Rand, fallback: PointValue): PointValue {
   const r = rand();
   if (r < 0.3) return fallback;
   if (r < 0.5) return 'pointer';
-  if (r < 0.85) return { x: pick(rand, ANCHORS), y: pick(rand, ANCHORS) };
+  if (r < 0.75) return { x: pick(rand, ANCHORS), y: pick(rand, ANCHORS) };
+  if (r < 0.88) {
+    // A slow moving centre (SPEC 7.1): orbit or wander around the middle.
+    const center = { x: 0.5, y: 0.5 };
+    const radius = Number(between(rand, 0.1, 0.3).toFixed(2));
+    return rand() < 0.5
+      ? { path: { kind: 'orbit', center, radius, speed: Number(between(rand, 0.04, 0.15).toFixed(2)) } }
+      : { path: { kind: 'wander', center, radius, speed: Number(between(rand, 0.1, 0.4).toFixed(2)) } };
+  }
   const free = (): number => Number(between(rand, -0.25, 1.25).toFixed(2));
   return { x: free(), y: free() };
 }

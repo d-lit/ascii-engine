@@ -14,7 +14,7 @@ import {
   type EffectLookup,
   type Preset,
 } from '../presets/preset.ts';
-import type { NumberSpec } from '../pipeline/params.ts';
+import { asParamValue, type NumberSpec } from '../pipeline/params.ts';
 import type { ChainEntry, Pipeline } from '../pipeline/pipeline.ts';
 import { button, buildParamControls, checkbox, maskControl, numberControl, row } from './controls.ts';
 
@@ -249,7 +249,8 @@ export class ChainPanel {
     card.classList.toggle('open', !body.hidden);
     body.append(
       numberControl('mix', MIX_SPEC, () => entry.mix, (v) => {
-        if (typeof v === 'number' || (typeof v === 'object' && !('x' in v))) entry.mix = v;
+        const pv = asParamValue(v);
+        if (pv !== null) entry.mix = pv;
       }),
       maskControl(() => entry.mask, (m) => pipeline.setMask(entry, m)),
       buildParamControls(entry.def.params, entry.values),

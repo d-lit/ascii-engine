@@ -8,11 +8,10 @@ import type {
   ParamInput,
   ParamSchema,
   ParamSpec,
-  PointValue,
 } from '../pipeline/params.ts';
-import { POINT_MAX, POINT_MIN } from '../pipeline/params.ts';
+import { asParamValue } from '../pipeline/params.ts';
+import { pointControl } from './point-control.ts';
 
-const ANCHORS = [0, 0.5, 1] as const;
 const LFO_SHAPES: readonly LfoShape[] = ['sine', 'triangle', 'saw', 'square', 'noise'];
 const NUMBER_MODES = ['const', 'lfo', 'env'] as const;
 type NumberMode = (typeof NUMBER_MODES)[number];
@@ -264,91 +263,6 @@ function paramControl(key: string, spec: ParamSpec, values: Record<string, Param
   }
 }
 
-/** Normalized position of a point value; the pointer has none. */
-function positionOf(v: unknown): { x: number; y: number } | null {
-  if (v === 'center') return { x: 0.5, y: 0.5 };
-  if (typeof v === 'object' && v !== null && 'x' in v && 'y' in v) {
-    const { x, y } = v as { x: unknown; y: unknown };
-    if (typeof x === 'number' && typeof y === 'number') return { x, y };
-  }
-  return null;
-}
-
-/**
- * Point editor (SPEC 7.1): a 3x3 anchor grid, a pointer button, and x / y
- * sliders for free placement, including off the picture (POINT_MIN..MAX).
- */
-export function pointControl(
-  caption: string,
-  get: () => unknown,
-  set: (p: PointValue) => void,
-): HTMLElement {
-  const box = document.createElement('div');
-  box.className = 'point';
-
-  const render = (): void => {
-    const current = get();
-    const pos = positionOf(current);
-    const isPointer = current === 'pointer';
-
-    const grid = document.createElement('div');
-    grid.className = 'point-grid';
-    for (const y of ANCHORS) {
-      for (const x of ANCHORS) {
-        const cell = document.createElement('button');
-        cell.type = 'button';
-        cell.className = 'point-anchor';
-        cell.title = `${x}, ${y}`;
-        cell.classList.toggle('on', pos !== null && pos.x === x && pos.y === y);
-        cell.addEventListener('click', () => {
-          set({ x, y });
-          render();
-        });
-        grid.append(cell);
-      }
-    }
-
-    const pointer = button('cursor', () => {
-      set('pointer');
-      render();
-    }, 'follow the pointer');
-    pointer.classList.toggle('on', isPointer);
-
-    const head = row(caption, grid, pointer);
-    head.classList.add('point-head');
-    if (pos === null) {
-      box.replaceChildren(head);
-      return;
-    }
-
-    // Free placement: sliders write a plain {x, y}; anchors stay highlighted when hit exactly.
-    const free = { x: pos.x, y: pos.y };
-    const update = (): void => {
-      set({ x: free.x, y: free.y });
-      for (const [k, el] of grid.querySelectorAll('.point-anchor').entries()) {
-        const ax = ANCHORS[k % 3]!;
-        const ay = ANCHORS[Math.floor(k / 3)]!;
-        el.classList.toggle('on', free.x === ax && free.y === ay);
-      }
-    };
-    const body = document.createElement('div');
-    body.className = 'mod-body';
-    body.append(
-      row('x', ...slider(POINT_MIN, POINT_MAX, 0.01, pos.x, (n) => {
-        free.x = n;
-        update();
-      })),
-      row('y', ...slider(POINT_MIN, POINT_MAX, 0.01, pos.y, (n) => {
-        free.y = n;
-        update();
-      })),
-    );
-    box.replaceChildren(head, body);
-  };
-
-  render();
-  return box;
-}
 
 /**
  * Controls generated from a param schema (invariant 6). They write straight
@@ -434,7 +348,8 @@ export function maskControl(get: () => MaskSpec | null, set: (m: MaskSpec | null
             mask.center = p;
           }),
           numberControl('radius', RADIUS_SPEC, () => mask.radius, (v) => {
-            if (typeof v === 'number' || (typeof v === 'object' && !('x' in v))) mask.radius = v;
+            const pv = asParamValue(v);
+            if (pv !== null) mask.radius = pv;
           }),
           row('soft', ...slider(0, 60, 1, mask.soft ?? 0, (n) => {
             mask.soft = n;

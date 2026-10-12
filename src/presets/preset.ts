@@ -10,6 +10,7 @@ import {
   type GradientStop,
 } from '../pipeline/colorize.ts';
 import { MASK_TYPES, type MaskSpec } from '../pipeline/mask.ts';
+import { isMotionValue } from '../pipeline/points.ts';
 import {
   BACKDROP_KINDS,
   BLUR_MAX,
@@ -101,8 +102,13 @@ export function isParamValue(v: unknown): v is ParamValue {
 
 export function isPointValue(v: unknown): v is PointValue {
   if (v === 'pointer' || v === 'center') return true;
-  const inRange = (n: unknown): boolean => finite(n) && n >= POINT_MIN && n <= POINT_MAX;
-  return isRecord(v) && inRange(v.x) && inRange(v.y);
+  if (!isRecord(v)) return false;
+  if ('x' in v || 'y' in v) {
+    const inRange = (n: unknown): boolean => finite(n) && n >= POINT_MIN && n <= POINT_MAX;
+    return inRange(v.x) && inRange(v.y);
+  }
+  // Moving points (SPEC 7.1): axes, paths, pointer follow.
+  return isMotionValue(v, isParamValue);
 }
 
 function validParam(spec: ParamSpec, v: unknown): boolean {

@@ -124,6 +124,22 @@ describe('point values', () => {
   });
 });
 
+describe('moving points', () => {
+  it('validate and round-trip; broken ones fall back with a warning', () => {
+    const chain = [
+      { effect: 'ripple', params: { center: { path: { kind: 'orbit', center: { x: 0.5, y: 0.5 }, radius: 0.2, speed: 0.1 } } } },
+      { effect: 'lens', params: { center: { follow: 'pointer', idle: { path: { kind: 'wander' } }, ease: 0.4 } } },
+      { effect: 'swirl', params: { center: { axes: { x: { lfo: 'sine', freq: 0.2, min: 0.2, max: 0.8 }, y: 0.5 } } } },
+    ];
+    const { preset, warnings } = validatePreset({ version: 1, chain }, lookup);
+    expect(preset.chain[0]!.params.center).toEqual(chain[0]!.params.center);
+    expect(preset.chain[1]!.params.center).toBeUndefined();
+    expect(preset.chain[2]!.params.center).toEqual(chain[2]!.params.center);
+    expect(warnings).toHaveLength(1);
+    expect(parsePreset(serializePreset(preset), lookup).preset.chain[0]!.params.center).toEqual(chain[0]!.params.center);
+  });
+});
+
 describe('backdrop block', () => {
   it('keeps image settings and never stores an image', () => {
     const raw = { version: 1, backdrop: { kind: 'image', origin: 'custom', fit: 'cover', opacity: 0.8, dim: 0.3, blur: 0.01, data: 'xxx' } };

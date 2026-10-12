@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "name": "Wandering light",
+  "ramp": "classic",
+  "polarity": "light-on-dark",
+  "color": { "mode": "mono" },
+  "backdrop": { "kind": "image", "origin": "picture", "fit": "grid", "opacity": 1, "dim": 0.1, "blur": 0 },
+  "chain": [
+    {
+      "effect": "erosion",
+      "params": { "threshold": 1, "softness": 0.1, "scale": 10, "speed": 0.3, "mode": "hide" },
+      "mask": {
+        "type": "radial",
+        "center": {
+          "follow": "pointer",
+          "idle": { "kind": "wander", "center": { "x": 0.5, "y": 0.5 }, "radius": 0.3, "speed": 0.15 },
+          "ease": 0.6
+        },
+        "radius": { "lfo": "sine", "freq": 0.2, "min": 12, "max": 20 },
+        "soft": 8
+      }
+    }
+  ]
+}

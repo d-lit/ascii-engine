@@ -54,6 +54,7 @@ import {
   type VideoQuality,
 } from './export/video-recorder.ts';
 import { button, checkbox, gradientControl, row, selectOf, slider } from './ui/controls.ts';
+import { CentersOverlay } from './ui/centers-overlay.ts';
 import { DebugOverlay } from './ui/debug-overlay.ts';
 import { ChainPanel, type ViewSettings } from './ui/panel.ts';
 import { makePanelResizable } from './ui/panel-resize.ts';
@@ -137,6 +138,8 @@ const pipeline = new Pipeline(createField(1, 1), meta, input.pointer);
 const overlay = new DebugOverlay(stage, ['params', 'sample', 'cell', 'post', 'render', 'total']);
 const stageMs = new Float64Array(6);
 overlay.visible = false;
+const centers = new CentersOverlay(stage, canvas);
+centers.visible = false;
 
 // ---- rebuild: file, settings or container size changed ----
 
@@ -213,6 +216,12 @@ function frame(dt: number): void {
   stageMs[4] = renderMs;
   stageMs[5] = tm.total + renderMs;
   overlay.sample(dt, stageMs);
+  if (debugToggle.checked) {
+    // Debug only: renderer.font allocates, so not on the normal frame path.
+    const dpr = window.devicePixelRatio || 1;
+    const font = renderer.font;
+    centers.draw(pipeline, font.cellW / dpr, font.cellH / dpr);
+  }
 }
 
 const loop = createLoop((dt) => {
@@ -258,6 +267,7 @@ async function load(file: File): Promise<void> {
   applyBackdrop(); // a `picture` backdrop follows the new source
   stage.classList.add('has-source');
   overlay.visible = debugToggle.checked;
+  centers.visible = debugToggle.checked;
   copyButton.disabled = false;
   pngButton.disabled = false;
   saveButton.disabled = false;
@@ -340,6 +350,7 @@ sourceCharsRow.hidden = true;
 
 const debugToggle = checkbox(true, (on) => {
   overlay.visible = on && source !== null;
+  centers.visible = on && source !== null;
 });
 
 view.append(

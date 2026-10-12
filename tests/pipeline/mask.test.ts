@@ -10,7 +10,7 @@ for (let y = 0; y < 5; y++) {
     src.alpha[y * 11 + x] = x === 0 ? 0 : 1;
   }
 }
-const frame = { cols: 11, rows: 5, pointer: { x: 2, y: 1 }, cellAspect: 0.5 };
+const frame = { cols: 11, rows: 5, pointer: { x: 2, y: 1, inside: true }, cellAspect: 0.5 };
 
 function mask(spec: MaskSpec, t = 0): Float32Array {
   const out = new Float32Array(55);

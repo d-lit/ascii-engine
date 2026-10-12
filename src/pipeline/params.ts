@@ -1,11 +1,19 @@
 import type { Vec2 } from '../core/math.ts';
 import { resolveMod } from './modulation.ts';
+import {
+  createPointState,
+  POINT_MAX,
+  POINT_MIN,
+  resolveMotion,
+  type MotionValue,
+  type PointFrame,
+  type PointState,
+} from './points.ts';
 
-export type PointValue = Vec2 | 'pointer' | 'center';
+/** Static, pointer or moving point (SPEC 7.1). Positions normalized, -0.5..1.5. */
+export type PointValue = Vec2 | 'pointer' | 'center' | MotionValue;
 
-/** Range of normalized point coordinates; beyond 0..1 the point sits off the picture (SPEC 7.1). */
-export const POINT_MIN = -0.5;
-export const POINT_MAX = 1.5;
+export { POINT_MAX, POINT_MIN };
 
 export interface NumberSpec {
   type: 'number';
@@ -74,11 +82,7 @@ export type ParamInput = ParamValue | boolean | string | PointValue;
 export type ParamBag = Record<string, number | boolean | string | Vec2>;
 
 /** Grid facts needed to place point params; FrameContext satisfies it. */
-export interface ParamFrame {
-  cols: number;
-  rows: number;
-  pointer: Vec2;
-}
+export type ParamFrame = PointFrame;
 
 /**
  * Number value `t` seconds after the effect's activation, clamped to the spec.
@@ -96,23 +100,37 @@ export function resolveNumber(spec: NumberSpec, value: ParamInput | undefined, t
   return v < spec.min ? spec.min : v > spec.max ? spec.max : v;
 }
 
-/** Writes a point in cell coordinates into `out`; normalized 0..1 spans cell centres. */
-export function resolvePoint(value: PointValue, frame: ParamFrame, out: Vec2): void {
+/**
+ * Writes a point in cell coordinates into `out`; normalized 0..1 spans cell
+ * centres. Moving points (axes, paths, pointer follow) use the effect clock `t`.
+ */
+export function resolvePoint(value: PointValue, frame: ParamFrame, t: number, out: PointState): void {
   if (value === 'pointer') {
     out.x = frame.pointer.x;
     out.y = frame.pointer.y;
   } else if (value === 'center') {
     out.x = (frame.cols - 1) / 2;
     out.y = (frame.rows - 1) / 2;
-  } else {
+  } else if ('x' in value) {
     out.x = Math.min(Math.max(value.x, POINT_MIN), POINT_MAX) * (frame.cols - 1);
     out.y = Math.min(Math.max(value.y, POINT_MIN), POINT_MAX) * (frame.rows - 1);
+  } else {
+    resolveMotion(value, frame, t, out);
   }
+}
+
+/** The input as a number or modulation value, or null if it is a point or something else. */
+export function asParamValue(v: ParamInput | undefined): ParamValue | null {
+  if (typeof v === 'number') return v;
+  if (typeof v !== 'object' || v === null) return null;
+  if ('x' in v || 'axes' in v || 'path' in v || 'follow' in v) return null;
+  return v;
 }
 
 function isPointValue(v: ParamInput | undefined): v is PointValue {
   if (v === 'pointer' || v === 'center') return true;
-  return typeof v === 'object' && 'x' in v && 'y' in v;
+  if (typeof v !== 'object' || v === null) return false;
+  return ('x' in v && 'y' in v) || 'axes' in v || 'path' in v || 'follow' in v;
 }
 
 /** Fresh bag with defaults; point params get their own reusable Vec2. */
@@ -120,7 +138,7 @@ export function createParamBag(schema: ParamSchema): ParamBag {
   const bag: ParamBag = {};
   for (const key of Object.keys(schema)) {
     const spec = schema[key]!;
-    bag[key] = spec.type === 'point' ? { x: 0, y: 0 } : spec.default;
+    bag[key] = spec.type === 'point' ? createPointState() : spec.default;
   }
   return bag;
 }
@@ -157,7 +175,8 @@ export function resolveParams(
         bag[key] = typeof value === 'string' ? value : spec.default;
         break;
       case 'point':
-        resolvePoint(isPointValue(value) ? value : spec.default, frame, bag[key] as Vec2);
+        // createParamBag made a PointState for every point key.
+        resolvePoint(isPointValue(value) ? value : spec.default, frame, t, bag[key] as PointState);
         break;
     }
   }

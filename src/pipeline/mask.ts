@@ -1,5 +1,5 @@
 import type { Field } from '../core/field.ts';
-import type { Vec2 } from '../core/math.ts';
+import { createPointState, type PointState } from './points.ts';
 import { smoothstep } from '../core/math.ts';
 import {
   resolveNumber,
@@ -29,11 +29,11 @@ const RADIUS_SPEC: NumberSpec = { type: 'number', min: 0, max: 10000, default: 1
 
 /** Reusable per-entry scratch, so filling a mask allocates nothing. */
 export interface MaskScratch {
-  readonly center: Vec2;
+  readonly center: PointState;
 }
 
 export function createMaskScratch(): MaskScratch {
-  return { center: { x: 0, y: 0 } };
+  return { center: createPointState() };
 }
 
 /**
@@ -68,7 +68,7 @@ export function fillMask(
       break;
     }
     case 'radial': {
-      resolvePoint(spec.center, frame, scratch.center);
+      resolvePoint(spec.center, frame, t, scratch.center);
       const cx = scratch.center.x;
       const cy = scratch.center.y;
       const radius = resolveNumber(RADIUS_SPEC, spec.radius, t);

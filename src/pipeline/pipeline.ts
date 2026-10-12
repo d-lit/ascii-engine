@@ -223,6 +223,25 @@ export class Pipeline {
     this.rebuild();
   }
 
+  /**
+   * Current centres of enabled effects and radial masks, in cells, for the
+   * debug overlay. Values are as resolved for the last frame.
+   */
+  forEachCenter(cb: (x: number, y: number, label: string, mask: boolean) => void): void {
+    for (const entry of this.chain) {
+      if (!entry.enabled) continue;
+      for (const key of entry.keys) {
+        if (entry.def.params[key]?.type !== 'point') continue;
+        const p = entry.params[key] as Vec2;
+        cb(p.x, p.y, entry.def.name, false);
+      }
+      if (entry.mask?.type === 'radial') {
+        const c = this.state.get(entry)?.scratch.center;
+        if (c !== undefined) cb(c.x, c.y, entry.def.name, true);
+      }
+    }
+  }
+
   /** Moves an entry to `index` in the chain (order = application order). */
   move(entry: ChainEntry, index: number): void {
     const from = this.chain.indexOf(entry);
