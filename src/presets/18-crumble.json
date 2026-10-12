@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "name": "Crumble",
+  "ramp": "long",
+  "polarity": "light-on-dark",
+  "color": { "mode": "source" },
+  "chain": [
+    {
+      "effect": "sand",
+      "params": {
+        "crumble": 0.025,
+        "clickRadius": 10,
+        "speed": 28,
+        "hold": 5,
+        "flight": 0.8
+      }
+    },
+    {
+      "effect": "trails",
+      "params": { "on": "sprites", "fade": 0.18 }
+    }
+  ]
+}
