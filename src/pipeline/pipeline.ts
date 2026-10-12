@@ -24,6 +24,7 @@ import {
   DEFAULT_STOPS,
   type ColorSettings,
 } from './colorize.ts';
+import { setModEnv, type AudioFeed, type ModEnv } from './modulation.ts';
 import { createMaskScratch, fillMask, type MaskScratch, type MaskSpec } from './mask.ts';
 import {
   createParamBag,
@@ -95,6 +96,8 @@ export class Pipeline {
   private work: WorkBuffer;
   private seed: number;
   private readonly state = new Map<ChainEntry, EntryState>();
+  // Transport time and track for modulation sources (SPEC 7.2).
+  private readonly modEnv: ModEnv = { time: 0, audio: null };
   // Per-stage lists aligned by index: entry, fn, this frame's mix and mask.
   private cellEntries: ChainEntry[] = [];
   private cellFns: CellFn[] = [];
@@ -314,7 +317,14 @@ export class Pipeline {
     return this.work;
   }
 
+  /** Track for `audio` params (SPEC 7.2); null = silent, params sit at `min`. */
+  setAudio(feed: AudioFeed | null): void {
+    this.modEnv.audio = feed;
+  }
+
   private resolve(entry: ChainEntry): void {
+    this.modEnv.time = this.ctx.time;
+    setModEnv(this.modEnv);
     const t = this.ctx.time - entry.activatedAt;
     resolveParams(entry.def.params, entry.keys, entry.values, this.ctx, entry.params, t);
   }
@@ -330,6 +340,8 @@ export class Pipeline {
   /** Per frame: mix values and mask buffers for one stage's entries. */
   private resolveWeights(entries: readonly ChainEntry[], mix: Float64Array): void {
     const ctx = this.ctx;
+    this.modEnv.time = ctx.time;
+    setModEnv(this.modEnv);
     for (let f = 0; f < entries.length; f++) {
       const entry = entries[f]!;
       const t = ctx.time - entry.activatedAt;

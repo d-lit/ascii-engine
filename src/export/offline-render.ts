@@ -8,6 +8,7 @@ import { createFramePainter, type FrameLook } from './frame-painter.ts';
 import type { PointerTrack } from './pointer-track.ts';
 import { EXPORT_SAMPLE_RATE, renderTrackSlice } from '../audio/slice.ts';
 import type { TrackTiming } from '../audio/track.ts';
+import type { AudioFeed } from '../pipeline/modulation.ts';
 
 /** Output frame sizes; `screen` keeps the on-screen canvas size. */
 export const FRAME_SIZES = {
@@ -54,7 +55,7 @@ export async function probeOfflineFormats(
 ): Promise<FormatSupport[]> {
   const mb = await import('./mux.ts');
   const can = (codec: OfflineFormat['codec'], w: number, h: number, bps: number, frameRate: number): Promise<boolean> =>
-    mb.canEncodeVideo(codec, { width: w, height: h, quality: new mb.Quality(bps), frameRate });
+    mb.canEncodeVideo(codec, { width: w, height: h, quality: new mb.Quality({ bitrate: Math.round(bps) }), frameRate });
   return Promise.all(
     OFFLINE_FORMATS.map(async (f) => {
       if (await can(f.codec, width, height, bitsPerSecond, fps)) return 'ok';
@@ -72,7 +73,7 @@ export const AUDIO_BITS_PER_SECOND = 192_000;
 /** Whether each offline format can carry sound in this browser (no substitution: SPEC 12.1). */
 export async function probeOfflineAudio(): Promise<boolean[]> {
   const mb = await import('./mux.ts');
-  const quality = new mb.Quality(AUDIO_BITS_PER_SECOND);
+  const quality = new mb.Quality({ bitrate: AUDIO_BITS_PER_SECOND });
   return Promise.all(
     OFFLINE_FORMATS.map((f) =>
       mb.canEncodeAudio(f.audioCodec, { numberOfChannels: 2, sampleRate: EXPORT_SAMPLE_RATE, quality }),
@@ -95,6 +96,8 @@ export interface OfflineJob extends Omit<FrameLook, 'cols' | 'rows' | 'cellAspec
   track: PointerTrack | null;
   /** Sound to put under the video, from the transport's zero; null = silent. */
   audio: { buffer: AudioBuffer; timing: TrackTiming } | null;
+  /** Track for `audio` params, whether or not the sound is encoded. */
+  feed: AudioFeed | null;
 }
 
 export interface OfflineResult {
@@ -116,7 +119,7 @@ export async function renderOffline(job: OfflineJob, onProgress: ProgressFn, sig
   const { cols, rows } = job.source;
 
   // The chosen format or nothing: no silent fallback to another container.
-  const quality = new mb.Quality(job.bitsPerSecond);
+  const quality = new mb.Quality({ bitrate: Math.round(job.bitsPerSecond) });
   const { codec, ext } = job.format;
   if (!(await mb.canEncodeVideo(codec, { width, height, quality, frameRate: fps }))) {
     throw new Error(`this browser cannot encode ${job.format.label} at ${width}×${height}`);
@@ -137,6 +140,7 @@ export async function renderOffline(job: OfflineJob, onProgress: ProgressFn, sig
   const pointer = createPointer();
   const pipeline = new Pipeline(job.source, job.meta, pointer);
   pipeline.setColor(job.color, job.ink);
+  pipeline.setAudio(job.feed);
   applyChain(pipeline, job.chain, job.lookup);
 
   const target = new mb.BufferTarget();
@@ -153,7 +157,7 @@ export async function renderOffline(job: OfflineJob, onProgress: ProgressFn, sig
   let audioSlice: AudioBuffer | null = null;
   if (job.audio !== null) {
     audioSlice = await renderTrackSlice(job.audio.buffer, job.audio.timing, job.seconds);
-    audioSource = new mb.AudioBufferSource({ codec: job.format.audioCodec, quality: new mb.Quality(AUDIO_BITS_PER_SECOND) });
+    audioSource = new mb.AudioBufferSource({ codec: job.format.audioCodec, quality: new mb.Quality({ bitrate: AUDIO_BITS_PER_SECOND }) });
     output.addAudioTrack(audioSource);
   }
   await output.start();

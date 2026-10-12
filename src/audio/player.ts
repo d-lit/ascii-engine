@@ -1,4 +1,8 @@
+import { createBandAnalysis, mixToMono, type BandTable } from './bands.ts';
 import { trackPosition, trackSpan, type TrackTiming } from './track.ts';
+
+// Table entries analysed between yields to the page (~10 ms of work each).
+const ANALYSIS_CHUNK = 200;
 
 // Playback further than this from the transport clock is re-seeked.
 const RESYNC = 0.08;
@@ -13,6 +17,7 @@ export class AudioPlayer {
   offset = 0;
   loop = false;
   private buffer_: AudioBuffer | null = null;
+  private bands_: BandTable | null = null;
   private ctx: AudioContext | null = null;
   private monitor: GainNode | null = null;
   private recordDest: MediaStreamAudioDestinationNode | null = null;
@@ -24,6 +29,11 @@ export class AudioPlayer {
 
   get buffer(): AudioBuffer | null {
     return this.buffer_;
+  }
+
+  /** Band table of the track for `audio` params; null until analysed. */
+  get bands(): BandTable | null {
+    return this.bands_;
   }
 
   get timing(): TrackTiming | null {
@@ -46,12 +56,25 @@ export class AudioPlayer {
     if (this.monitor !== null) this.monitor.gain.value = on ? 0 : 1;
   }
 
-  /** Decodes a file; call from a user gesture (the audio context starts there). */
-  async load(file: File): Promise<void> {
+  /**
+   * Decodes and analyses a file (SPEC 7.2); call from a user gesture (the
+   * audio context starts there). Analysis runs in chunks, yielding to the page.
+   */
+  async load(file: File, onProgress: (share: number) => void = () => undefined): Promise<void> {
     const ctx = this.context();
     const buffer = await ctx.decodeAudioData(await file.arrayBuffer());
+    const channels: Float32Array[] = [];
+    for (let c = 0; c < buffer.numberOfChannels; c++) channels.push(buffer.getChannelData(c));
+    const analysis = createBandAnalysis(mixToMono(channels), buffer.sampleRate);
+    let done = 0;
+    while (!analysis.step(ANALYSIS_CHUNK)) {
+      done += ANALYSIS_CHUNK;
+      onProgress(Math.min(1, (done * 0.01) / buffer.duration));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
     this.stop();
     this.buffer_ = buffer;
+    this.bands_ = analysis.table();
     this.name = file.name;
     this.offset = 0;
   }
@@ -59,6 +82,7 @@ export class AudioPlayer {
   clear(): void {
     this.stop();
     this.buffer_ = null;
+    this.bands_ = null;
     this.name = '';
     this.offset = 0;
   }

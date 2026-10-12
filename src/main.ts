@@ -70,6 +70,7 @@ import { CentersOverlay } from './ui/centers-overlay.ts';
 import { createPanelTabs } from './ui/panel-tabs.ts';
 import { TransportBar } from './ui/transport.ts';
 import { AudioPlayer } from './audio/player.ts';
+import type { AudioFeed } from './pipeline/modulation.ts';
 import { DebugOverlay } from './ui/debug-overlay.ts';
 import { ChainPanel, type ViewSettings } from './ui/panel.ts';
 import { makePanelResizable } from './ui/panel-resize.ts';
@@ -723,17 +724,26 @@ audioFile.accept = 'audio/*';
 audioFile.hidden = true;
 const audioControls = document.createElement('div');
 
+/** The live pipeline's view of the track for `audio` params. */
+function audioFeed(): AudioFeed | null {
+  const bands = player.bands;
+  const timing = player.timing;
+  return bands === null || timing === null ? null : { bands, timing };
+}
+
 function audioChanged(): void {
   renderAudioControls();
   panel.dispatchEvent(new Event('audiochange'));
 }
+
+panel.addEventListener('audiochange', () => pipeline.setAudio(audioFeed()));
 
 audioFile.addEventListener('change', () => {
   const file = audioFile.files?.[0];
   audioFile.value = '';
   if (!file) return;
   setStatus(`decoding ${file.name}…`);
-  player.load(file).then(
+  player.load(file, (share) => setStatus(`analysing ${file.name} · ${Math.round(share * 100)}%`)).then(
     () => {
       setStatus(`audio: ${file.name} · ${player.span.toFixed(1)} s`);
       audioChanged();
@@ -779,6 +789,7 @@ function renderAudioControls(): void {
     row('loop', checkbox(player.loop, (on) => {
       player.loop = on;
       player.invalidate();
+      panel.dispatchEvent(new Event('audiochange'));
     })),
     row('mute', checkbox(player.muted, (on) => {
       player.muted = on;
@@ -1257,6 +1268,7 @@ async function toggleRender(): Promise<void> {
         format,
         track: replay ? takeTrack : null,
         audio: withAudio ? { buffer: audioBuffer, timing: audioTiming } : null,
+        feed: audioFeed(),
       },
       (done, total) => {
         renderButton.textContent = `cancel · ${Math.floor((done / total) * 100)}%`;

@@ -1,6 +1,7 @@
 import type { GradientStop } from '../pipeline/colorize.ts';
 import type { MaskSpec } from '../pipeline/mask.ts';
 import type {
+  AudioValue,
   EnvValue,
   LfoShape,
   LfoValue,
@@ -10,10 +11,12 @@ import type {
   ParamSpec,
 } from '../pipeline/params.ts';
 import { asParamValue } from '../pipeline/params.ts';
+import { AUDIO_BANDS } from '../audio/bands.ts';
+import { AUDIO_ATTACK, AUDIO_RELEASE } from '../pipeline/modulation.ts';
 import { pointControl } from './point-control.ts';
 
 const LFO_SHAPES: readonly LfoShape[] = ['sine', 'triangle', 'saw', 'square', 'noise'];
-const NUMBER_MODES = ['const', 'lfo', 'env'] as const;
+const NUMBER_MODES = ['const', 'lfo', 'env', 'audio'] as const;
 type NumberMode = (typeof NUMBER_MODES)[number];
 
 // ---- building blocks ----
@@ -102,6 +105,7 @@ function modeOf(v: ParamInput | undefined): NumberMode {
   if (typeof v === 'object' && v !== null) {
     if ('lfo' in v) return 'lfo';
     if ('env' in v) return 'env';
+    if ('audio' in v) return 'audio';
   }
   return 'const';
 }
@@ -192,6 +196,28 @@ export function numberControl(
           lfo.phase = n;
         })),
       );
+    } else if (mode === 'audio') {
+      const a = value as AudioValue;
+      body.append(
+        row('band', selectOf(AUDIO_BANDS, a.audio, (b) => {
+          a.audio = b;
+        })),
+        row('min', ...slider(spec.min, spec.max, step, a.min, (n) => {
+          a.min = n;
+        })),
+        row('max', ...slider(spec.min, spec.max, step, a.max, (n) => {
+          a.max = n;
+        })),
+        row('gain', ...slider(0, 4, 0.05, a.gain ?? 1, (n) => {
+          a.gain = n;
+        })),
+        row('attack, s', ...slider(0, 0.5, 0.01, a.attack ?? AUDIO_ATTACK, (n) => {
+          a.attack = n;
+        })),
+        row('release, s', ...slider(0, 2, 0.01, a.release ?? AUDIO_RELEASE, (n) => {
+          a.release = n;
+        })),
+      );
     } else {
       const env = value as EnvValue;
       const text = document.createElement('input');
@@ -221,6 +247,8 @@ export function numberControl(
     const lo = lerp(spec.min, spec.max, 0.25);
     const hi = lerp(spec.min, spec.max, 0.75);
     if (mode === 'lfo') return { lfo: 'sine', freq: 0.25, min: lo, max: hi };
+    // Quiet = the bottom of the range, loud = three quarters: clearly visible.
+    if (mode === 'audio') return { audio: 'bass', min: spec.min, max: hi };
     return { env: [[0, lo], [2, hi], [4, lo]], loop: true, ease: 'smooth' };
   };
 

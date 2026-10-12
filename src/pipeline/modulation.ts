@@ -1,6 +1,32 @@
 import { smoothstep } from '../core/math.ts';
 import { HASH_UNIT, hashInt2 } from '../core/prng.ts';
-import type { EnvValue, LfoShape, LfoValue } from './params.ts';
+import { AUDIO_BANDS, sampleBand, type BandTable } from '../audio/bands.ts';
+import { trackPosition, type TrackTiming } from '../audio/track.ts';
+import type { AudioValue, EnvValue, LfoShape, LfoValue } from './params.ts';
+
+/** The analysed track and how it lines up with the transport (SPEC 7.2). */
+export interface AudioFeed {
+  readonly bands: BandTable;
+  readonly timing: TrackTiming;
+}
+
+/**
+ * What sources may read besides the effect clock: the transport time and
+ * the audio feed. One per pipeline, made current by the pipeline before it
+ * resolves params (resolution is synchronous, so the live view and an
+ * offline render never see each other's).
+ */
+export interface ModEnv {
+  /** Transport seconds (pipeline time since restart). */
+  time: number;
+  audio: AudioFeed | null;
+}
+
+let env: ModEnv = { time: 0, audio: null };
+
+export function setModEnv(next: ModEnv): void {
+  env = next;
+}
 
 /**
  * A source of modulated numbers, recognized by a marker key in the value
@@ -11,7 +37,7 @@ export interface ModSource {
   /** Marker key: a value object is handled by the first source whose key it has. */
   readonly key: string;
   /** `t` is seconds since the effect's activation. undefined = malformed value. */
-  resolve(value: object, t: number): number | undefined;
+  resolve(value: object, t: number, env: ModEnv): number | undefined;
 }
 
 const sources: ModSource[] = [];
@@ -27,7 +53,7 @@ export function registerModSource(source: ModSource): void {
 export function resolveMod(value: object, t: number): number | undefined {
   for (let i = 0; i < sources.length; i++) {
     const s = sources[i]!;
-    if (s.key in value) return s.resolve(value, t);
+    if (s.key in value) return s.resolve(value, t, env);
   }
   return undefined;
 }
@@ -133,5 +159,39 @@ export const envSource: ModSource = {
   },
 };
 
+// ---- audio (SPEC 7.2) ----
+
+export const AUDIO_ATTACK = 0.02;
+export const AUDIO_RELEASE = 0.25;
+
+function isAudio(v: object): v is AudioValue {
+  const o = v as Partial<AudioValue>;
+  return (
+    typeof o.audio === 'string' &&
+    (AUDIO_BANDS as readonly string[]).includes(o.audio) &&
+    finite(o.min) &&
+    finite(o.max) &&
+    (o.gain === undefined || finite(o.gain)) &&
+    (o.attack === undefined || finite(o.attack)) &&
+    (o.release === undefined || finite(o.release))
+  );
+}
+
+/** Follows a band of the track at transport time; `min` without a track or past its end. */
+export const audioSource: ModSource = {
+  key: 'audio',
+  resolve(value, _t, e) {
+    if (!isAudio(value)) return undefined;
+    const feed = e.audio;
+    if (feed === null) return value.min;
+    const pos = trackPosition(e.time, feed.timing);
+    if (pos === null) return value.min;
+    const raw = sampleBand(feed.bands, value.audio, pos, Math.max(0, value.attack ?? AUDIO_ATTACK), Math.max(0, value.release ?? AUDIO_RELEASE));
+    const v = Math.min(1, Math.max(0, raw * (value.gain ?? 1)));
+    return value.min + (value.max - value.min) * v;
+  },
+};
+
 registerModSource(lfoSource);
 registerModSource(envSource);
+registerModSource(audioSource);

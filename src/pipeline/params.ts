@@ -1,3 +1,4 @@
+import type { AudioBand } from '../audio/bands.ts';
 import type { Vec2 } from '../core/math.ts';
 import { resolveMod } from './modulation.ts';
 import {
@@ -52,7 +53,20 @@ export interface EnvValue {
 }
 
 /** A modulated number: any object form resolved by a registered ModSource. */
-export type ModValue = LfoValue | EnvValue;
+/** Follows a band of the session's track (SPEC 7.2). */
+export interface AudioValue {
+  audio: AudioBand;
+  min: number;
+  max: number;
+  /** Multiplier before clamping to 0..1. */
+  gain?: number;
+  /** Averaging window, seconds. */
+  attack?: number;
+  /** Fall time of peaks, seconds. */
+  release?: number;
+}
+
+export type ModValue = LfoValue | EnvValue | AudioValue;
 
 export type ParamValue = number | ModValue;
 
