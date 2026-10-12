@@ -7,7 +7,7 @@ import type { ColorSettings } from '../pipeline/colorize.ts';
 import { createPointer, Pipeline } from '../pipeline/pipeline.ts';
 import { getAtlas } from '../render/atlas.ts';
 import { fitCell } from '../render/canvas2d.ts';
-import { backdropFill, paintFrame, type Backdrop } from '../render/backdrop.ts';
+import { paintFrame, prepareBackdrop, type Backdrop, type BackdropImage } from '../render/backdrop.ts';
 import { Compositor } from '../render/compositor.ts';
 import type { PointerTrack } from './pointer-track.ts';
 
@@ -25,12 +25,14 @@ export interface OfflineFormat {
   readonly ext: 'mp4' | 'webm';
   readonly codec: 'avc' | 'vp9';
   readonly label: string;
+  /** Keeps a transparent backdrop transparent (VP9 alpha in WebM). */
+  readonly alpha: boolean;
 }
 
 /** MP4 first: the format social media accepts everywhere. */
 export const OFFLINE_FORMATS: readonly OfflineFormat[] = [
-  { ext: 'mp4', codec: 'avc', label: 'MP4 · H.264' },
-  { ext: 'webm', codec: 'vp9', label: 'WebM · VP9' },
+  { ext: 'mp4', codec: 'avc', label: 'MP4 · H.264', alpha: false },
+  { ext: 'webm', codec: 'vp9', label: 'WebM · VP9', alpha: true },
 ];
 
 /** Which offline formats this browser can encode at this size and bitrate. */
@@ -70,6 +72,8 @@ export interface OfflineJob {
   ink: Rgb;
   /** Under the glyph layer; `transparent` keeps alpha only with an alpha-capable format (step 2). */
   backdrop: Backdrop;
+  /** Image for an image backdrop; session state, not part of presets. */
+  backdropImage: BackdropImage | null;
   rampChars: string;
   family: string;
   weight: number;
@@ -128,7 +132,12 @@ export async function renderOffline(job: OfflineJob, onProgress: ProgressFn, sig
   if (!ctx || !layerCtx) throw new Error('renderOffline: no 2d context');
   compositor.setInk(job.ink);
   const image = new ImageData(compositor.pixels, compositor.width, compositor.height);
-  const fill = backdropFill(job.backdrop, job.theme.bg);
+  // Static backdrop at the target size; the grid rect keeps `grid` fit aligned.
+  const under = document.createElement('canvas');
+  under.width = width;
+  under.height = height;
+  const grid = { x: layout.offsetX, y: layout.offsetY, w: compositor.width, h: compositor.height };
+  prepareBackdrop(under, job.backdrop, job.theme.bg, job.backdropImage, grid);
 
   // Fresh pipeline with the same chain and default seed: replays the live take.
   const pointer = createPointer();
@@ -141,7 +150,10 @@ export async function renderOffline(job: OfflineJob, onProgress: ProgressFn, sig
     format: useMp4 ? new mb.Mp4OutputFormat({ fastStart: 'in-memory' }) : new mb.WebMOutputFormat(),
     target,
   });
-  const videoSource = new mb.CanvasSource(canvas, { codec, quality });
+  // Alpha only when there is transparency to keep and the format can carry it
+  // (DECISIONS 020): VP9 writes it as side data in WebM.
+  const keepAlpha = job.backdrop.kind === 'transparent' && job.format.alpha;
+  const videoSource = new mb.CanvasSource(canvas, { codec, quality, alpha: keepAlpha ? 'keep' : 'discard' });
   output.addVideoTrack(videoSource, { frameRate: fps });
   await output.start();
 
@@ -160,7 +172,7 @@ export async function renderOffline(job: OfflineJob, onProgress: ProgressFn, sig
         layerCtx.putImageData(image, 0, 0, 0, dirtyTop, compositor.width, dirtyBottom - dirtyTop);
       }
       // Every frame is a full picture for the encoder: backdrop, then glyphs.
-      paintFrame(ctx, layer, fill, layout.offsetX, layout.offsetY);
+      paintFrame(ctx, layer, under, layout.offsetX, layout.offsetY);
       await videoSource.add(i * step, step);
       onProgress(i + 1, total);
     }

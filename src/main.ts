@@ -34,7 +34,16 @@ import { MAX_STOPS } from './presets/preset.ts';
 import { parseHex } from './core/color.ts';
 import { Canvas2DRenderer } from './render/canvas2d.ts';
 import { exportText } from './render/export-text.ts';
-import { BACKDROP_KINDS, type Backdrop } from './render/backdrop.ts';
+import {
+  BACKDROP_KINDS,
+  BLUR_MAX,
+  DEFAULT_IMAGE_BACKDROP,
+  IMAGE_FITS,
+  IMAGE_ORIGINS,
+  type Backdrop,
+  type BackdropImage,
+  type ImageBackdrop,
+} from './render/backdrop.ts';
 import {
   bitrateFor,
   CanvasRecorder,
@@ -42,7 +51,7 @@ import {
   videoFileName,
   type VideoQuality,
 } from './export/video-recorder.ts';
-import { button, checkbox, gradientControl, row, selectOf } from './ui/controls.ts';
+import { button, checkbox, gradientControl, row, selectOf, slider } from './ui/controls.ts';
 import { DebugOverlay } from './ui/debug-overlay.ts';
 import { ChainPanel, type ViewSettings } from './ui/panel.ts';
 import { makePanelResizable } from './ui/panel-resize.ts';
@@ -244,6 +253,7 @@ async function load(file: File): Promise<void> {
   }
   imageField = null;
   textField = null;
+  applyBackdrop(); // a `picture` backdrop follows the new source
   stage.classList.add('has-source');
   overlay.visible = debugToggle.checked;
   copyButton.disabled = false;
@@ -369,19 +379,112 @@ renderGradient();
 
 // Custom colour kept across mode switches; green is the usual chroma key.
 let backdropColor = '#00b140';
+// Image backdrop settings kept across mode switches, and the custom image
+// itself (session state: never stored in presets).
+let imageBackdrop: ImageBackdrop = { ...DEFAULT_IMAGE_BACKDROP };
+let customBackdrop: ImageBitmap | null = null;
+
 const backgroundBox = section('background');
 const backdropColorInput = document.createElement('input');
 backdropColorInput.type = 'color';
 backdropColorInput.value = backdropColor;
 const backdropColorRow = row('colour', backdropColorInput);
+const imageBox = document.createElement('div');
+
+/** The picture an image backdrop shows right now, if any. */
+function resolveBackdropImage(): BackdropImage | null {
+  const b = settings.backdrop;
+  if (b.kind !== 'image') return null;
+  if (b.origin === 'picture') {
+    return source?.kind === 'image' ? { source: source.bitmap, width: source.bitmap.width, height: source.bitmap.height } : null;
+  }
+  return customBackdrop === null ? null : { source: customBackdrop, width: customBackdrop.width, height: customBackdrop.height };
+}
 
 function applyBackdrop(): void {
-  renderer.setBackdrop(settings.backdrop);
+  renderer.setBackdrop(settings.backdrop, resolveBackdropImage());
   backdropColorRow.hidden = settings.backdrop.kind !== 'color';
+  renderImageControls();
+  // Sections created later (video formats) listen for this.
+  panel.dispatchEvent(new Event('backdropchange'));
+}
+
+const backdropFile = document.createElement('input');
+backdropFile.type = 'file';
+backdropFile.accept = 'image/*';
+backdropFile.hidden = true;
+backdropFile.addEventListener('change', () => {
+  const file = backdropFile.files?.[0];
+  backdropFile.value = '';
+  if (!file) return;
+  createImageBitmap(file).then(
+    (bitmap) => {
+      customBackdrop?.close();
+      customBackdrop = bitmap;
+      imageBackdrop = { ...imageBackdrop, origin: 'custom' };
+      settings.backdrop = imageBackdrop;
+      applyBackdrop();
+      setStatus(`backdrop: ${file.name}`);
+    },
+    (err: unknown) => {
+      console.error(err);
+      setStatus(`cannot load backdrop ${file.name}`);
+    },
+  );
+});
+
+/** Image settings; edits mutate the live backdrop object and re-prepare it. */
+function renderImageControls(): void {
+  const b = settings.backdrop;
+  if (b.kind !== 'image') {
+    imageBox.replaceChildren();
+    return;
+  }
+  const refresh = (): void => renderer.setBackdrop(b, resolveBackdropImage());
+  const missing =
+    resolveBackdropImage() !== null
+      ? null
+      : b.origin === 'custom'
+        ? 'No image yet: load one.'
+        : 'The source is not a picture: load an image or switch to custom.';
+  const note = document.createElement('p');
+  note.className = 'hint';
+  note.textContent = missing ?? '';
+  note.hidden = missing === null;
+
+  imageBox.replaceChildren(
+    row(
+      'image',
+      selectOf(IMAGE_ORIGINS, b.origin, (o) => {
+        b.origin = o;
+        applyBackdrop();
+      }),
+      button('load…', () => backdropFile.click(), 'separate backdrop image'),
+    ),
+    note,
+    row('fit', selectOf(IMAGE_FITS, b.fit, (f) => {
+      b.fit = f;
+      refresh();
+    })),
+    row('opacity', ...slider(0, 1, 0.01, b.opacity, (n) => {
+      b.opacity = n;
+      refresh();
+    })),
+    row('dim', ...slider(0, 1, 0.01, b.dim, (n) => {
+      b.dim = n;
+      refresh();
+    })),
+    row('blur', ...slider(0, BLUR_MAX, 0.001, b.blur, (n) => {
+      b.blur = n;
+      refresh();
+    })),
+  );
 }
 
 const backdropSelect = selectOf(BACKDROP_KINDS, settings.backdrop.kind, (k) => {
-  settings.backdrop = k === 'color' ? { kind: 'color', color: backdropColor } : { kind: k };
+  if (k === 'color') settings.backdrop = { kind: 'color', color: backdropColor };
+  else if (k === 'image') settings.backdrop = imageBackdrop;
+  else settings.backdrop = { kind: k };
   applyBackdrop();
 });
 backdropColorInput.addEventListener('input', () => {
@@ -389,7 +492,7 @@ backdropColorInput.addEventListener('input', () => {
   settings.backdrop = { kind: 'color', color: backdropColor };
   applyBackdrop();
 });
-backgroundBox.append(row('mode', backdropSelect), backdropColorRow);
+backgroundBox.append(row('mode', backdropSelect), backdropColorRow, imageBox, backdropFile);
 applyBackdrop();
 
 function setView(next: ViewSettings): void {
@@ -402,6 +505,7 @@ function setView(next: ViewSettings): void {
     backdropColor = next.backdrop.color;
     backdropColorInput.value = next.backdrop.color;
   }
+  if (next.backdrop.kind === 'image') imageBackdrop = next.backdrop;
   applyBackdrop();
   rampSelect.value = next.ramp;
   polaritySelect.value = next.polarity;
@@ -528,6 +632,20 @@ let takeStart = 0;
 
 const formatSelect = document.createElement('select');
 formats.forEach((f, i) => formatSelect.add(new Option(f.label, String(i))));
+
+const recordAlphaHint = hint(
+  'Transparent background: WebM keeps it, MP4 records it black.',
+);
+
+/** Marks formats that lose a transparent background (DECISIONS 020). */
+function labelRecordFormats(): void {
+  const transparent = settings.backdrop.kind === 'transparent';
+  formats.forEach((f, i) => {
+    const option = formatSelect.options[i];
+    if (option !== undefined) option.textContent = transparent && f.ext === 'mp4' ? `${f.label} — no transparency` : f.label;
+  });
+  recordAlphaHint.hidden = !transparent;
+}
 formatSelect.addEventListener('change', () => {
   video.format = Number(formatSelect.value);
 });
@@ -624,6 +742,7 @@ if (formats.length === 0) {
 } else {
   videoBox.append(
     row('format', formatSelect),
+    recordAlphaHint,
     row('from start', checkbox(video.fromStart, (on) => {
       video.fromStart = on;
     })),
@@ -659,7 +778,9 @@ async function refreshOfflineFormats(): Promise<void> {
     const option = offlineFormatSelect.options[i];
     if (option === undefined) return;
     option.disabled = ok[i] !== true;
-    option.textContent = ok[i] === true ? f.label : `${f.label} — not supported here`;
+    const lossy = settings.backdrop.kind === 'transparent' && !f.alpha;
+    option.textContent =
+      ok[i] !== true ? `${f.label} — not supported here` : lossy ? `${f.label} — no transparency` : f.label;
   });
   // Keep the choice if it still works, otherwise move to the first that does.
   if (ok[offline.format] !== true) {
@@ -705,6 +826,7 @@ async function toggleRender(): Promise<void> {
         theme,
         ink: parseHex(theme.fg),
         backdrop: settings.backdrop,
+        backdropImage: resolveBackdropImage(),
         rampChars: BUILTIN_RAMP_CHARS[settings.ramp],
         family: FONT_FAMILY,
         weight: 400,
@@ -743,24 +865,6 @@ async function toggleRender(): Promise<void> {
   }
 }
 
-async function runAlphaProbe(): Promise<void> {
-  setStatus('alpha test: encoding…');
-  try {
-    const { renderAlphaProbe } = await import('./export/alpha-probe.ts');
-    const blob = await renderAlphaProbe();
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'alpha-test.webm';
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 10_000);
-    setStatus(`alpha test saved · ${(blob.size / 1e3).toFixed(0)} KB`);
-  } catch (err) {
-    console.error(err);
-    setStatus(`alpha test failed: ${err instanceof Error ? err.message : String(err)}`);
-  }
-}
-
 videoBox.append(subhead('render · offline, exact fps'));
 if (typeof VideoEncoder === 'undefined') {
   videoBox.append(hint('This browser has no WebCodecs: offline render is unavailable.'));
@@ -773,11 +877,15 @@ if (typeof VideoEncoder === 'undefined') {
     })),
     row('replay take', replayToggle),
     row('render', renderButton),
-    // Temporary (phase 4.7 step 0): transparency probe for the editor check.
-    row('alpha test', button('WebM with alpha', () => void runAlphaProbe())),
   );
   void refreshOfflineFormats();
 }
+
+panel.addEventListener('backdropchange', () => {
+  labelRecordFormats();
+  void refreshOfflineFormats();
+});
+labelRecordFormats();
 
 const status = document.createElement('p');
 status.className = 'status';

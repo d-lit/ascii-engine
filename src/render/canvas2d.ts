@@ -2,7 +2,7 @@ import type { FieldMeta, Polarity, WorkBuffer } from '../core/field.ts';
 import type { FontSpec, QuantizeMode, Ramp } from '../core/ramp.ts';
 import { getAtlas, type GlyphAtlas } from './atlas.ts';
 import { parseHex } from '../core/color.ts';
-import { backdropFill, paintFrame, type Backdrop } from './backdrop.ts';
+import { paintFrame, prepareBackdrop, type Backdrop, type BackdropImage } from './backdrop.ts';
 import { Compositor } from './compositor.ts';
 import type { Renderer } from './renderer.ts';
 
@@ -59,6 +59,10 @@ export class Canvas2DRenderer implements Renderer {
   private readonly layerCtx: CanvasRenderingContext2D;
   private opts: Canvas2DOptions;
   private backdrop: Backdrop = { kind: 'theme' };
+  private backdropImage: BackdropImage | null = null;
+  // Static part of the frame (fill or prepared image), rebuilt on change only.
+  private readonly under: HTMLCanvasElement = document.createElement('canvas');
+  private underDirty = true;
   private cols = 0;
   private rows = 0;
   private cell: CellSize = { w: 1, h: 1 };
@@ -88,8 +92,11 @@ export class Canvas2DRenderer implements Renderer {
     this.atlas = null;
   }
 
-  setBackdrop(backdrop: Backdrop): void {
+  /** `image` is used by image backdrops; it is session state, never stored. */
+  setBackdrop(backdrop: Backdrop, image: BackdropImage | null = null): void {
     this.backdrop = backdrop;
+    this.backdropImage = image;
+    this.underDirty = true;
     this.frameDirty = true;
     // Checkerboard behind transparent pixels, on screen only.
     this.canvas.classList.toggle('transparent', backdrop.kind === 'transparent');
@@ -140,6 +147,9 @@ export class Canvas2DRenderer implements Renderer {
     this.canvas.height = ch;
     this.layer.width = pw;
     this.layer.height = ph;
+    this.under.width = cw;
+    this.under.height = ch;
+    this.underDirty = true;
     this.compositor = new Compositor(cols, rows, cell.w, cell.h);
     this.image = new ImageData(this.compositor.pixels, pw, ph);
     this.inkFor = null;
@@ -160,7 +170,8 @@ export class Canvas2DRenderer implements Renderer {
     if (this.inkFor !== theme) {
       compositor.setInk(parseHex(theme.fg));
       this.inkFor = theme;
-      this.frameDirty = true; // the theme backdrop colour may have changed too
+      this.underDirty = true; // the theme backdrop colour may have changed too
+      this.frameDirty = true;
     }
 
     // Masks are colour-free: an ink change alone keeps the atlas.
@@ -173,8 +184,13 @@ export class Canvas2DRenderer implements Renderer {
     if (layerDirty) {
       this.layerCtx.putImageData(image, 0, 0, 0, dirtyTop, compositor.width, dirtyBottom - dirtyTop);
     }
+    if (this.underDirty) {
+      const grid = { x: 0, y: 0, w: compositor.width, h: compositor.height };
+      prepareBackdrop(this.under, this.backdrop, theme.bg, this.backdropImage, grid);
+      this.underDirty = false;
+    }
     if (layerDirty || this.frameDirty) {
-      paintFrame(this.ctx, this.layer, backdropFill(this.backdrop, theme.bg), 0, 0);
+      paintFrame(this.ctx, this.layer, this.under, 0, 0);
       this.frameDirty = false;
     }
   }

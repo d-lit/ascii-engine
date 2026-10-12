@@ -124,6 +124,29 @@ describe('point values', () => {
   });
 });
 
+describe('backdrop block', () => {
+  it('keeps image settings and never stores an image', () => {
+    const raw = { version: 1, backdrop: { kind: 'image', origin: 'custom', fit: 'cover', opacity: 0.8, dim: 0.3, blur: 0.01, data: 'xxx' } };
+    const { preset, warnings } = validatePreset(raw, lookup);
+    expect(warnings).toEqual([]);
+    expect(preset.backdrop).toEqual({ kind: 'image', origin: 'custom', fit: 'cover', opacity: 0.8, dim: 0.3, blur: 0.01 });
+    expect(JSON.parse(serializePreset(preset)).backdrop).toEqual(preset.backdrop);
+  });
+
+  it('fills bad image fields with defaults', () => {
+    const { preset } = validatePreset({ version: 1, backdrop: { kind: 'image', fit: 'tile', dim: 7 } }, lookup);
+    expect(preset.backdrop).toMatchObject({ kind: 'image', origin: 'picture', fit: 'grid', dim: 0.55 });
+  });
+
+  it('omits the theme backdrop and warns on garbage', () => {
+    const { preset } = validatePreset({ version: 1 }, lookup);
+    expect(JSON.parse(serializePreset(preset)).backdrop).toBeUndefined();
+    const bad = validatePreset({ version: 1, backdrop: { kind: 'color', color: 'green' } }, lookup);
+    expect(bad.preset.backdrop).toEqual({ kind: 'theme' });
+    expect(bad.warnings.some((w) => w.includes('backdrop'))).toBe(true);
+  });
+});
+
 describe('colour block', () => {
   const stops = [
     { pos: 0, color: '#000' },

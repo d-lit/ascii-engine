@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { layoutFrame } from '../../src/export/offline-render.ts';
+import { layoutFrame, OFFLINE_FORMATS } from '../../src/export/offline-render.ts';
 
 describe('layoutFrame', () => {
   it.each([
@@ -21,5 +21,14 @@ describe('layoutFrame', () => {
 
   it('uses the largest cell that fits', () => {
     expect(layoutFrame(100, 50, 0.5, 1000, 1000)).toEqual({ cellW: 10, cellH: 20, offsetX: 0, offsetY: 0 });
+  });
+});
+
+describe('OFFLINE_FORMATS', () => {
+  it('only WebM/VP9 carries transparency', () => {
+    expect(OFFLINE_FORMATS.map((f) => [f.ext, f.codec, f.alpha])).toEqual([
+      ['mp4', 'avc', false],
+      ['webm', 'vp9', true],
+    ]);
   });
 });

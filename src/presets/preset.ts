@@ -9,7 +9,14 @@ import {
   type GradientStop,
 } from '../pipeline/colorize.ts';
 import { MASK_TYPES, type MaskSpec } from '../pipeline/mask.ts';
-import { BACKDROP_KINDS, type Backdrop } from '../render/backdrop.ts';
+import {
+  BACKDROP_KINDS,
+  BLUR_MAX,
+  DEFAULT_IMAGE_BACKDROP,
+  IMAGE_FITS,
+  IMAGE_ORIGINS,
+  type Backdrop,
+} from '../render/backdrop.ts';
 import { resolveMod } from '../pipeline/modulation.ts';
 import {
   POINT_MAX,
@@ -210,8 +217,28 @@ function validateColor(raw: unknown, warn: (msg: string) => void): ColorSettings
 function validateBackdrop(raw: unknown, warn: (msg: string) => void): Backdrop {
   if (raw === undefined) return { kind: 'theme' };
   if (isRecord(raw) && oneOf(raw.kind, BACKDROP_KINDS)) {
-    if (raw.kind !== 'color') return { kind: raw.kind };
-    if (isHexColor(raw.color)) return { kind: 'color', color: raw.color };
+    switch (raw.kind) {
+      case 'theme':
+      case 'transparent':
+        return { kind: raw.kind };
+      case 'color':
+        if (isHexColor(raw.color)) return { kind: 'color', color: raw.color };
+        break;
+      case 'image': {
+        // Settings only; the image comes from the session (DECISIONS 020).
+        const d = DEFAULT_IMAGE_BACKDROP;
+        const unit = (v: unknown, max: number, fallback: number): number =>
+          finite(v) && v >= 0 && v <= max ? v : fallback;
+        return {
+          kind: 'image',
+          origin: oneOf(raw.origin, IMAGE_ORIGINS) ? raw.origin : d.origin,
+          fit: oneOf(raw.fit, IMAGE_FITS) ? raw.fit : d.fit,
+          opacity: unit(raw.opacity, 1, d.opacity),
+          dim: unit(raw.dim, 1, d.dim),
+          blur: unit(raw.blur, BLUR_MAX, d.blur),
+        };
+      }
+    }
   }
   warn(`bad backdrop ${show(raw)}, using theme`);
   return { kind: 'theme' };
