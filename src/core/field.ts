@@ -60,6 +60,11 @@ export interface WorkBuffer {
   hidden: Uint8Array;
   /** One slot per cell: a system moves at most every cell. */
   sprites: SpritePool;
+  /**
+   * How much of last frame's sprite layer stays (0..1, 0 = cleared): tails
+   * behind moving sprites. Set by systems each frame (`trails`).
+   */
+  spriteFade: number;
 }
 
 export interface FieldOptions {
@@ -105,6 +110,7 @@ export function createWorkBuffer(cols: number, rows: number, opts: FieldOptions 
     charOverride: new Uint16Array(n),
     hidden: new Uint8Array(n),
     sprites: createSpritePool(n),
+    spriteFade: 0,
   };
 }
 

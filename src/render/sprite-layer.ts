@@ -9,6 +9,8 @@ const SHIFT_R = LITTLE_ENDIAN ? 0 : 24;
 const SHIFT_G = LITTLE_ENDIAN ? 8 : 16;
 const SHIFT_B = LITTLE_ENDIAN ? 16 : 8;
 const SHIFT_A = LITTLE_ENDIAN ? 24 : 0;
+// Faded pixels below this alpha are cleared, so tails end.
+const FADE_FLOOR = 4;
 
 /**
  * The sprite layer (SPEC 6.3, DECISIONS 024): glyphs of `work.sprites` at
@@ -59,23 +61,56 @@ export class SpriteLayer {
     masks: MaskSource,
   ): void {
     const { px, width, height, cellW, cellH } = this;
-    // Clear what the last frame drew.
+    // Last frame's box: cleared, or faded when trails are on (work.spriteFade).
     const px0 = this.x0;
     const py0 = this.y0;
     const px1 = this.x1;
     const py1 = this.y1;
+    const fade = Math.round(Math.min(1, Math.max(0, work.spriteFade)) * 256);
+    let left0 = width;
+    let top0 = height;
+    let right0 = 0;
+    let bottom0 = 0;
     if (px1 > px0) {
-      for (let y = py0; y < py1; y++) px.fill(0, y * width + px0, y * width + px1);
+      if (fade === 0) {
+        for (let y = py0; y < py1; y++) px.fill(0, y * width + px0, y * width + px1);
+      } else {
+        // Hot loop: indices within the old box. What is still visible keeps
+        // the box; bounds per row, not per pixel.
+        for (let y = py0; y < py1; y++) {
+          const row = y * width;
+          let first = -1;
+          let last = -1;
+          for (let d = row + px0, e = row + px1; d < e; d++) {
+            const p = px[d]!;
+            if (p === 0) continue;
+            const a = (((p >>> SHIFT_A) & 255) * fade) >> 8;
+            if (a < FADE_FLOOR) {
+              px[d] = 0;
+              continue;
+            }
+            px[d] = ((p & ~(255 << SHIFT_A)) | (a << SHIFT_A)) >>> 0;
+            if (first < 0) first = d;
+            last = d;
+          }
+          if (first < 0) continue;
+          if (first - row < left0) left0 = first - row;
+          if (last - row + 1 > right0) right0 = last - row + 1;
+          if (y < top0) top0 = y;
+          bottom0 = y + 1;
+        }
+      }
     }
 
     const sp = work.sprites;
     const alpha = work.alpha;
     const color = work.color;
     const [inkR, inkG, inkB] = this.ink;
-    let nx0 = width;
-    let ny0 = height;
-    let nx1 = 0;
-    let ny1 = 0;
+    // New box starts as what survived the fade.
+    let nx0 = left0;
+    let ny0 = top0;
+    let nx1 = right0;
+    let ny1 = bottom0;
     const tile = cellW * cellH;
 
     // Hot loop: sprite index < count <= capacity; pixel indices clipped below.
@@ -138,6 +173,11 @@ export class SpriteLayer {
     this.y0 = nx1 > nx0 ? ny0 : 0;
     this.x1 = nx1 > nx0 ? nx1 : 0;
     this.y1 = nx1 > nx0 ? ny1 : 0;
+  }
+
+  /** The layer holds pixels (sprites or fading tails): draw again next frame. */
+  get hasContent(): boolean {
+    return this.x1 > this.x0;
   }
 
   /** Something is drawn (or was, and must be cleared on screen). */

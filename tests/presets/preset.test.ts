@@ -51,6 +51,17 @@ describe('built-in presets', () => {
       expect(preset.chain.length).toBeGreaterThan(0);
     },
   );
+  it.each(BUILTIN_PRESETS.map((p) => [(p as { name: string }).name, p]))(
+    '%s names only params its effects have (unknown ones are silently ignored)',
+    (_name, raw) => {
+      const chain = (raw as { chain: Array<{ effect: string; params?: Record<string, unknown> }> }).chain;
+      for (const entry of chain) {
+        const def = lookup(entry.effect);
+        expect(def, entry.effect).toBeDefined();
+        for (const key of Object.keys(entry.params ?? {})) expect(Object.keys(def!.params), `${entry.effect}.${key}`).toContain(key);
+      }
+    },
+  );
 });
 
 describe('validatePreset', () => {

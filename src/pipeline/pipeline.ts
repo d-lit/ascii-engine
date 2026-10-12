@@ -378,12 +378,14 @@ export class Pipeline {
       if (this.systemsDirty) {
         work.hidden.fill(0);
         work.sprites.count = 0;
+        work.spriteFade = 0;
         this.systemsDirty = false;
       }
       return;
     }
     work.hidden.fill(0);
     work.sprites.count = 0;
+    work.spriteFade = 0;
     for (let s = 0; s < systems.length; s++) {
       const mix = systemMix[s]!;
       if (mix > 0) systems[s]!.step(ctx, work, systemMasks[s]!, mix);

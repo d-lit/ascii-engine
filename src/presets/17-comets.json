@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "name": "Comets",
+  "ramp": "classic",
+  "polarity": "light-on-dark",
+  "color": {
+    "mode": "gradient",
+    "stops": [
+      { "pos": 0, "color": "#0b0200" },
+      { "pos": 0.4, "color": "#7a1d00" },
+      { "pos": 0.75, "color": "#ff7a00" },
+      { "pos": 1, "color": "#fff1c1" }
+    ]
+  },
+  "chain": [
+    {
+      "effect": "swirl",
+      "params": { "center": "center", "angle": { "lfo": "sine", "freq": 0.06, "min": -240, "max": 240 }, "radius": 70, "wobble": 0.1 }
+    },
+    {
+      "effect": "particles",
+      "params": {
+        "intro": "implode",
+        "stiffness": 9,
+        "damping": 2.2,
+        "push": 350,
+        "pushRadius": 10,
+        "explode": 120,
+        "radius": 50
+      }
+    },
+    {
+      "effect": "trails",
+      "params": { "on": "both", "fade": 0.45 }
+    }
+  ]
+}

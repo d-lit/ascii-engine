@@ -86,4 +86,23 @@ describe('SpriteLayer', () => {
     expect(px(layer, 7, 0)[3]).toBeGreaterThan(185);
     expect(px(layer, 7, 0)[3]).toBeLessThan(195);
   });
+
+  it('fades instead of clearing when the work buffer asks for tails', () => {
+    const { w, layer } = setup();
+    const sp = w.sprites;
+    sp.x[0] = 0;
+    sp.y[0] = 0;
+    sp.src[0] = 0;
+    sp.alpha[0] = 1;
+    sp.count = 1;
+    layer.draw(w, ramp, 'light-on-dark', true, 'nearest-density', masks());
+    sp.count = 0;
+    w.spriteFade = 0.5;
+    layer.draw(w, ramp, 'light-on-dark', true, 'nearest-density', masks());
+    expect(px(layer, 0, 0)).toEqual([...FG, 127]);
+    expect(layer.hasContent).toBe(true);
+    for (let i = 0; i < 8; i++) layer.draw(w, ramp, 'light-on-dark', true, 'nearest-density', masks());
+    expect(px(layer, 0, 0)).toEqual([0, 0, 0, 0]);
+    expect(layer.hasContent).toBe(false);
+  });
 });

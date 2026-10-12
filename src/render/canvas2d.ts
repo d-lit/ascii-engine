@@ -304,7 +304,7 @@ export class Canvas2DRenderer implements Renderer {
         this.spriteCtx.putImageData(this.spriteImage, 0, 0, sprites.dirtyX, sprites.dirtyY, sprites.dirtyW, sprites.dirtyH);
         layerDirty = true;
       }
-      this.spritesShown = work.sprites.count > 0;
+      this.spritesShown = sprites.hasContent;
     }
     if (this.underDirty) {
       prepareBackdrop(this.under, this.backdrop, theme.bg, this.backdropImage, pictureRect(this.gridRect, this.pictureFrac), this.backdropCrop);
