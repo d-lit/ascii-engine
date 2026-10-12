@@ -51,7 +51,7 @@ function pixel(c: Compositor, x: number, y: number): number[] {
 
 function setup(cols: number) {
   const c = new Compositor(cols, 1, 2, 2);
-  c.setColors(BG, FG);
+  c.setInk(FG);
   return c;
 }
 
@@ -65,29 +65,29 @@ describe('alphaScale', () => {
   });
 });
 
+// Uncovered pixels of the glyph layer are fully transparent (DECISIONS 020).
+const CLEAR = [0, 0, 0, 0];
+
 describe('Compositor', () => {
-  it('draws glyph coverage through the bg -> fg palette', () => {
+  it('draws glyph coverage as ink with alpha, transparent elsewhere', () => {
     const c = setup(3);
     c.compose(work([1, 0.5, 0]), ramp, 'light-on-dark', true, 'nearest-density', fakeMasks());
 
-    // '@' fills its whole cell with fg.
+    // '@' fills its whole cell with opaque ink.
     expect(pixel(c, 0, 0)).toEqual([...FG, 255]);
     expect(pixel(c, 1, 1)).toEqual([...FG, 255]);
     // '.' lights only its top-left pixel.
     expect(pixel(c, 2, 0)).toEqual([...FG, 255]);
-    expect(pixel(c, 3, 1)).toEqual([...BG, 255]);
-    // ' ' is background.
-    expect(pixel(c, 4, 0)).toEqual([...BG, 255]);
+    expect(pixel(c, 3, 1)).toEqual(CLEAR);
+    // ' ' leaves the layer clear.
+    expect(pixel(c, 4, 0)).toEqual(CLEAR);
     expect([c.dirtyTop, c.dirtyBottom]).toEqual([0, 2]);
   });
 
-  it('blends partial alpha between bg and fg', () => {
+  it('turns partial cell alpha into pixel alpha, not into a blend', () => {
     const c = setup(1);
     c.compose(work([1], [0.5]), ramp, 'light-on-dark', true, 'nearest-density', fakeMasks());
-    const [r, g, b] = pixel(c, 0, 0);
-    expect(r).toBeCloseTo((BG[0] + FG[0]) / 2, -1);
-    expect(g).toBeCloseTo((BG[1] + FG[1]) / 2, -1);
-    expect(b).toBeCloseTo((BG[2] + FG[2]) / 2, -1);
+    expect(pixel(c, 0, 0)).toEqual([...FG, 127]);
   });
 
   it('skips unchanged cells and reports a clean frame', () => {
@@ -95,34 +95,34 @@ describe('Compositor', () => {
     const masks = fakeMasks();
     const w = work([1, 1]);
     c.compose(w, ramp, 'light-on-dark', true, 'nearest-density', masks);
-    c.pixels.fill(0); // anything rewritten would show up
+    c.pixels.fill(7); // anything rewritten would show up
     c.compose(w, ramp, 'light-on-dark', true, 'nearest-density', masks);
-    expect([...c.pixels].every((v) => v === 0)).toBe(true);
+    expect([...c.pixels].every((v) => v === 7)).toBe(true);
     expect(c.dirtyBottom).toBe(c.dirtyTop);
   });
 
-  it('redraws only the changed cell, and everything after setColors', () => {
+  it('redraws only the changed cell, and everything after setInk', () => {
     const c = setup(2);
     const masks = fakeMasks();
     const w = work([1, 1]);
     c.compose(w, ramp, 'light-on-dark', true, 'nearest-density', masks);
-    c.pixels.fill(0);
+    c.pixels.fill(7);
     w.lum[1] = 0;
     c.compose(w, ramp, 'light-on-dark', true, 'nearest-density', masks);
-    expect(pixel(c, 0, 0)).toEqual([0, 0, 0, 0]);
-    expect(pixel(c, 2, 0)).toEqual([...BG, 255]);
+    expect(pixel(c, 0, 0)).toEqual([7, 7, 7, 7]);
+    expect(pixel(c, 2, 0)).toEqual(CLEAR);
 
-    c.setColors(FG, BG);
+    c.setInk(BG);
     c.compose(w, ramp, 'light-on-dark', true, 'nearest-density', masks);
     expect(pixel(c, 0, 0)).toEqual([...BG, 255]);
   });
 
-  it('treats a transparent glyph as background and honours charOverride', () => {
+  it('treats a transparent glyph as empty and honours charOverride', () => {
     const c = setup(2);
     const w = work([1, 0], [0, 1]);
     w.charOverride[1] = 64;
     c.compose(w, ramp, 'light-on-dark', true, 'nearest-density', fakeMasks());
-    expect(pixel(c, 0, 0)).toEqual([...BG, 255]);
+    expect(pixel(c, 0, 0)).toEqual(CLEAR);
     expect(pixel(c, 2, 0)).toEqual([...FG, 255]);
   });
 });
@@ -134,22 +134,19 @@ describe('Compositor colour path', () => {
     return w;
   }
 
-  it('draws each cell in its own ink, background where uncovered', () => {
+  it('draws each cell in its own ink, transparent where uncovered', () => {
     const c = setup(2);
     const w = colored([1, 0.5], [[255, 0, 0], [0, 0, 255]]);
     c.compose(w, ramp, 'light-on-dark', true, 'nearest-density', fakeMasks());
     expect(pixel(c, 0, 0)).toEqual([255, 0, 0, 255]);
-    expect(pixel(c, 2, 0)).toEqual([0, 0, 255, 255]); // '.' lit pixel
-    expect(pixel(c, 3, 1)).toEqual([...BG, 255]); // '.' unlit pixel
+    expect(pixel(c, 2, 0)).toEqual([0, 0, 255, 255]);
+    expect(pixel(c, 3, 1)).toEqual(CLEAR);
   });
 
-  it('blends partial alpha toward the background', () => {
+  it('keeps the exact ink and puts cell alpha into pixel alpha', () => {
     const c = setup(1);
     c.compose(colored([1], [[250, 240, 230]], [0.5]), ramp, 'light-on-dark', true, 'nearest-density', fakeMasks());
-    const [r, g, b] = pixel(c, 0, 0);
-    expect(Math.abs(r! - (BG[0] + 250) / 2)).toBeLessThanOrEqual(1);
-    expect(Math.abs(g! - (BG[1] + 240) / 2)).toBeLessThanOrEqual(1);
-    expect(Math.abs(b! - (BG[2] + 230) / 2)).toBeLessThanOrEqual(1);
+    expect(pixel(c, 0, 0)).toEqual([250, 240, 230, 127]);
   });
 
   it('redraws a cell when only its ink changes, skips it otherwise', () => {
@@ -157,11 +154,11 @@ describe('Compositor colour path', () => {
     const masks = fakeMasks();
     const w = colored([1, 1], [[255, 0, 0], [255, 0, 0]]);
     c.compose(w, ramp, 'light-on-dark', true, 'nearest-density', masks);
-    c.pixels.fill(0);
+    c.pixels.fill(7);
     w.color![3] = 0;
     w.color![4] = 255;
     c.compose(w, ramp, 'light-on-dark', true, 'nearest-density', masks);
-    expect(pixel(c, 0, 0)).toEqual([0, 0, 0, 0]);
+    expect(pixel(c, 0, 0)).toEqual([7, 7, 7, 7]);
     expect(pixel(c, 2, 0)).toEqual([0, 255, 0, 255]);
   });
 

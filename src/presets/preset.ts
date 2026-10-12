@@ -9,6 +9,7 @@ import {
   type GradientStop,
 } from '../pipeline/colorize.ts';
 import { MASK_TYPES, type MaskSpec } from '../pipeline/mask.ts';
+import { BACKDROP_KINDS, type Backdrop } from '../render/backdrop.ts';
 import { resolveMod } from '../pipeline/modulation.ts';
 import {
   POINT_MAX,
@@ -38,6 +39,8 @@ export interface Preset {
   ramp: RampName;
   polarity: Polarity;
   color: ColorSettings;
+  /** Settings only: an image backdrop is never stored (DECISIONS 020). */
+  backdrop: Backdrop;
   chain: PresetEffect[];
 }
 
@@ -57,6 +60,7 @@ export const DEFAULT_PRESET: Preset = {
   ramp: 'classic',
   polarity: 'light-on-dark',
   color: { mode: 'mono', stops: [...DEFAULT_STOPS] },
+  backdrop: { kind: 'theme' },
   chain: [],
 };
 
@@ -203,6 +207,16 @@ function validateColor(raw: unknown, warn: (msg: string) => void): ColorSettings
   return color;
 }
 
+function validateBackdrop(raw: unknown, warn: (msg: string) => void): Backdrop {
+  if (raw === undefined) return { kind: 'theme' };
+  if (isRecord(raw) && oneOf(raw.kind, BACKDROP_KINDS)) {
+    if (raw.kind !== 'color') return { kind: raw.kind };
+    if (isHexColor(raw.color)) return { kind: 'color', color: raw.color };
+  }
+  warn(`bad backdrop ${show(raw)}, using theme`);
+  return { kind: 'theme' };
+}
+
 /**
  * Validates untrusted preset data (SPEC 8). Never throws: anything unusable
  * falls back to a default and adds a warning.
@@ -236,6 +250,7 @@ export function validatePreset(raw: unknown, lookup: EffectLookup): PresetLoad {
   }
 
   const color = validateColor(raw.color, warn);
+  const backdrop = validateBackdrop(raw.backdrop, warn);
 
   const chain: PresetEffect[] = [];
   if (raw.chain !== undefined && !Array.isArray(raw.chain)) {
@@ -248,7 +263,7 @@ export function validatePreset(raw: unknown, lookup: EffectLookup): PresetLoad {
   }
 
   return {
-    preset: { version: PRESET_VERSION, name, ramp, polarity, color, chain },
+    preset: { version: PRESET_VERSION, name, ramp, polarity, color, backdrop, chain },
     warnings,
   };
 }
@@ -299,6 +314,8 @@ export function serializePreset(preset: Preset): string {
       polarity: preset.polarity,
       // Stops only matter for the gradient mode; keep files short otherwise.
       color: preset.color.mode === 'gradient' ? preset.color : { mode: preset.color.mode },
+      // Theme backdrop is the default: omitted to keep files short.
+      ...(preset.backdrop.kind === 'theme' ? {} : { backdrop: preset.backdrop }),
       chain,
     },
     null,

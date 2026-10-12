@@ -1,6 +1,7 @@
 import type { Polarity } from '../core/field.ts';
 import type { RampName } from '../core/ramp.ts';
 import type { ColorSettings } from '../pipeline/colorize.ts';
+import type { Backdrop } from '../render/backdrop.ts';
 import type { AnyEffectDef } from '../effects/types.ts';
 import { BUILTIN_PRESETS } from '../presets/builtin.ts';
 import { randomChain } from '../presets/random.ts';
@@ -21,6 +22,7 @@ export interface ViewSettings {
   ramp: RampName;
   polarity: Polarity;
   color: ColorSettings;
+  backdrop: Backdrop;
 }
 
 /** What the chain panel needs from the app. */
@@ -64,7 +66,9 @@ export class ChainPanel {
 
   /** Applies a preset: view settings first, then the chain. */
   applyPreset(preset: Preset): void {
-    this.host.setView({ ramp: preset.ramp, polarity: preset.polarity, color: structuredClone(preset.color) });
+    this.host.setView({ ramp: preset.ramp, polarity: preset.polarity, color: structuredClone(preset.color),
+      backdrop: structuredClone(preset.backdrop),
+    });
     applyChain(this.host.pipeline, preset.chain, this.host.lookup);
     this.nameInput.value = preset.name;
     this.render();
@@ -127,6 +131,7 @@ export class ChainPanel {
       ramp: view.ramp,
       polarity: view.polarity,
       color: structuredClone(view.color),
+      backdrop: structuredClone(view.backdrop),
       chain: randomChain(this.host.effects, seed),
     });
     this.host.status(`random chain, seed ${seed}`);
@@ -153,6 +158,7 @@ export class ChainPanel {
       ramp: view.ramp,
       polarity: view.polarity,
       color: structuredClone(view.color),
+      backdrop: structuredClone(view.backdrop),
       chain: chainToPreset(this.host.pipeline.chain),
     });
     const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));

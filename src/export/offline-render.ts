@@ -7,6 +7,7 @@ import type { ColorSettings } from '../pipeline/colorize.ts';
 import { createPointer, Pipeline } from '../pipeline/pipeline.ts';
 import { getAtlas } from '../render/atlas.ts';
 import { fitCell } from '../render/canvas2d.ts';
+import { backdropFill, paintFrame, type Backdrop } from '../render/backdrop.ts';
 import { Compositor } from '../render/compositor.ts';
 import type { PointerTrack } from './pointer-track.ts';
 
@@ -67,7 +68,8 @@ export interface OfflineJob {
   color: ColorSettings;
   theme: { bg: string; fg: string };
   ink: Rgb;
-  bg: Rgb;
+  /** Under the glyph layer; `transparent` keeps alpha only with an alpha-capable format (step 2). */
+  backdrop: Backdrop;
   rampChars: string;
   family: string;
   weight: number;
@@ -117,13 +119,16 @@ export async function renderOffline(job: OfflineJob, onProgress: ProgressFn, sig
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
-  const ctx = canvas.getContext('2d', { alpha: false });
-  if (!ctx) throw new Error('renderOffline: no 2d context');
-  ctx.fillStyle = job.theme.bg;
-  ctx.fillRect(0, 0, width, height);
+  const ctx = canvas.getContext('2d', { alpha: true });
   const compositor = new Compositor(cols, rows, layout.cellW, layout.cellH);
-  compositor.setColors(job.bg, job.ink);
+  const layer = document.createElement('canvas');
+  layer.width = compositor.width;
+  layer.height = compositor.height;
+  const layerCtx = layer.getContext('2d', { alpha: true });
+  if (!ctx || !layerCtx) throw new Error('renderOffline: no 2d context');
+  compositor.setInk(job.ink);
   const image = new ImageData(compositor.pixels, compositor.width, compositor.height);
+  const fill = backdropFill(job.backdrop, job.theme.bg);
 
   // Fresh pipeline with the same chain and default seed: replays the live take.
   const pointer = createPointer();
@@ -150,17 +155,12 @@ export async function renderOffline(job: OfflineJob, onProgress: ProgressFn, sig
       if (job.track !== null) job.track.apply(t, t - step, pointer);
       const work = pipeline.frame(step);
       compositor.compose(work, ramp, polarity, job.useSourceChars, job.quantizeMode, atlas);
-      if (compositor.dirtyBottom > compositor.dirtyTop) {
-        ctx.putImageData(
-          image,
-          layout.offsetX,
-          layout.offsetY,
-          0,
-          compositor.dirtyTop,
-          compositor.width,
-          compositor.dirtyBottom - compositor.dirtyTop,
-        );
+      const { dirtyTop, dirtyBottom } = compositor;
+      if (dirtyBottom > dirtyTop) {
+        layerCtx.putImageData(image, 0, 0, 0, dirtyTop, compositor.width, dirtyBottom - dirtyTop);
       }
+      // Every frame is a full picture for the encoder: backdrop, then glyphs.
+      paintFrame(ctx, layer, fill, layout.offsetX, layout.offsetY);
       await videoSource.add(i * step, step);
       onProgress(i + 1, total);
     }

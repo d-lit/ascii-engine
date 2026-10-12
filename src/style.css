@@ -380,3 +380,13 @@ body {
   font-weight: 400;
   color: var(--muted);
 }
+
+/* Transparent backdrop: checkerboard behind the canvas, on screen only. */
+#view.transparent {
+  background-color: #2a2a30;
+  background-image:
+    linear-gradient(45deg, #3a3a42 25%, transparent 25%, transparent 75%, #3a3a42 75%),
+    linear-gradient(45deg, #3a3a42 25%, transparent 25%, transparent 75%, #3a3a42 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+}

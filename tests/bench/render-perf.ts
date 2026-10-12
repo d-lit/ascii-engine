@@ -69,7 +69,7 @@ function measure(
   if (color !== undefined) p.setColor(color, [232, 230, 227]);
   for (const def of defs) p.add(def, def === decode ? { speed: 400, scramble: 30, jitter: 0 } : {});
   const c = new Compositor(COLS, ROWS, cellW, cellH);
-  c.setColors([11, 11, 13], [232, 230, 227]);
+  c.setInk([232, 230, 227]);
   const masks = fakeMasks(cellW, cellH);
 
   const step = (): void => {

@@ -34,6 +34,7 @@ import { MAX_STOPS } from './presets/preset.ts';
 import { parseHex } from './core/color.ts';
 import { Canvas2DRenderer } from './render/canvas2d.ts';
 import { exportText } from './render/export-text.ts';
+import { BACKDROP_KINDS, type Backdrop } from './render/backdrop.ts';
 import {
   bitrateFor,
   CanvasRecorder,
@@ -63,6 +64,7 @@ interface Settings {
   useSourceChars: boolean;
   trimRight: boolean;
   color: ColorSettings;
+  backdrop: Backdrop;
 }
 
 const settings: Settings = {
@@ -73,6 +75,7 @@ const settings: Settings = {
   useSourceChars: true,
   trimRight: true,
   color: { mode: 'mono', stops: [...DEFAULT_STOPS] },
+  backdrop: { kind: 'theme' },
 };
 
 function el<T extends HTMLElement>(selector: string): T {
@@ -244,6 +247,7 @@ async function load(file: File): Promise<void> {
   stage.classList.add('has-source');
   overlay.visible = debugToggle.checked;
   copyButton.disabled = false;
+  pngButton.disabled = false;
   saveButton.disabled = false;
   recordButton.disabled = false;
   renderButton.disabled = false;
@@ -361,10 +365,44 @@ function renderGradient(): void {
 colorBox.append(row('mode', colorModeSelect), gradientBox);
 renderGradient();
 
+// ---- panel: background (DECISIONS 020) ----
+
+// Custom colour kept across mode switches; green is the usual chroma key.
+let backdropColor = '#00b140';
+const backgroundBox = section('background');
+const backdropColorInput = document.createElement('input');
+backdropColorInput.type = 'color';
+backdropColorInput.value = backdropColor;
+const backdropColorRow = row('colour', backdropColorInput);
+
+function applyBackdrop(): void {
+  renderer.setBackdrop(settings.backdrop);
+  backdropColorRow.hidden = settings.backdrop.kind !== 'color';
+}
+
+const backdropSelect = selectOf(BACKDROP_KINDS, settings.backdrop.kind, (k) => {
+  settings.backdrop = k === 'color' ? { kind: 'color', color: backdropColor } : { kind: k };
+  applyBackdrop();
+});
+backdropColorInput.addEventListener('input', () => {
+  backdropColor = backdropColorInput.value;
+  settings.backdrop = { kind: 'color', color: backdropColor };
+  applyBackdrop();
+});
+backgroundBox.append(row('mode', backdropSelect), backdropColorRow);
+applyBackdrop();
+
 function setView(next: ViewSettings): void {
   settings.ramp = next.ramp;
   settings.polarity = next.polarity;
   settings.color = next.color;
+  settings.backdrop = next.backdrop;
+  backdropSelect.value = next.backdrop.kind;
+  if (next.backdrop.kind === 'color') {
+    backdropColor = next.backdrop.color;
+    backdropColorInput.value = next.backdrop.color;
+  }
+  applyBackdrop();
   rampSelect.value = next.ramp;
   polaritySelect.value = next.polarity;
   colorModeSelect.value = next.color.mode;
@@ -382,7 +420,12 @@ const chainPanel = new ChainPanel(chainRoot, {
   pipeline,
   effects: listEffects(),
   lookup: getEffect,
-  getView: () => ({ ramp: settings.ramp, polarity: settings.polarity, color: settings.color }),
+  getView: () => ({
+    ramp: settings.ramp,
+    polarity: settings.polarity,
+    color: settings.color,
+    backdrop: settings.backdrop,
+  }),
   setView,
   status: (m) => setStatus(m),
 });
@@ -404,6 +447,26 @@ function baseName(name: string): string {
 }
 
 const exportBox = section('export');
+
+// Current frame as PNG: backdrop included, transparent where the backdrop is.
+const pngButton = button('save PNG', () => {
+  if (source === null) return;
+  const name = videoFileName(source.name, chainPanel.presetName, 'png');
+  canvas.toBlob((blob) => {
+    if (blob === null) {
+      setStatus('PNG export failed');
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = name;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    setStatus(`saved ${name} · ${canvas.width}×${canvas.height}`);
+  }, 'image/png');
+});
+pngButton.disabled = true;
 
 const copyButton = document.createElement('button');
 copyButton.type = 'button';
@@ -441,6 +504,7 @@ exportBox.append(
     settings.trimRight = on;
   })),
   row('text', copyButton, saveButton),
+  row('frame', pngButton),
 );
 
 // ---- export: video (real time) ----
@@ -640,7 +704,7 @@ async function toggleRender(): Promise<void> {
         color: structuredClone(settings.color),
         theme,
         ink: parseHex(theme.fg),
-        bg: parseHex(theme.bg),
+        backdrop: settings.backdrop,
         rampChars: BUILTIN_RAMP_CHARS[settings.ramp],
         family: FONT_FAMILY,
         weight: 400,
@@ -679,6 +743,24 @@ async function toggleRender(): Promise<void> {
   }
 }
 
+async function runAlphaProbe(): Promise<void> {
+  setStatus('alpha test: encoding…');
+  try {
+    const { renderAlphaProbe } = await import('./export/alpha-probe.ts');
+    const blob = await renderAlphaProbe();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'alpha-test.webm';
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    setStatus(`alpha test saved · ${(blob.size / 1e3).toFixed(0)} KB`);
+  } catch (err) {
+    console.error(err);
+    setStatus(`alpha test failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 videoBox.append(subhead('render · offline, exact fps'));
 if (typeof VideoEncoder === 'undefined') {
   videoBox.append(hint('This browser has no WebCodecs: offline render is unavailable.'));
@@ -691,6 +773,8 @@ if (typeof VideoEncoder === 'undefined') {
     })),
     row('replay take', replayToggle),
     row('render', renderButton),
+    // Temporary (phase 4.7 step 0): transparency probe for the editor check.
+    row('alpha test', button('WebM with alpha', () => void runAlphaProbe())),
   );
   void refreshOfflineFormats();
 }
