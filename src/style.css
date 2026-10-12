@@ -462,3 +462,69 @@ body {
   margin-top: 0;
   border-top: none;
 }
+
+/* Transport bar (SPEC 10.1): over the bottom of the stage, never in the frame. */
+.transport {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font: 16px/1 var(--mono);
+  color: var(--fg);
+  background: rgb(0 0 0 / 0.6);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  opacity: 0.55;
+  transition: opacity 0.15s;
+}
+
+.transport:hover,
+.transport:focus-within {
+  opacity: 1;
+}
+
+.transport[hidden] {
+  display: none;
+}
+
+.transport button {
+  min-width: 44px;
+  padding: 9px 10px;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.transport button:hover:not(:disabled) {
+  border-color: var(--border);
+}
+
+.transport button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.transport button.rec {
+  color: #e5484d;
+}
+
+.transport button.rec.on {
+  background: #e5484d;
+  color: #fff;
+}
+
+.transport output {
+  min-width: 7ch;
+  padding: 0 8px;
+  font-size: 15px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}

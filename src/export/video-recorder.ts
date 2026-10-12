@@ -60,6 +60,9 @@ export class CanvasRecorder {
   private recorder: MediaRecorder | null = null;
   private chunks: Blob[] = [];
   private startedAt = 0;
+  // Paused time is left out of `elapsed`: pausedAt >= 0 while paused.
+  private pausedAt = -1;
+  private pausedFor = 0;
 
   get recording(): boolean {
     return this.recorder !== null;
@@ -67,7 +70,9 @@ export class CanvasRecorder {
 
   /** Seconds since start, 0 when idle. */
   get elapsed(): number {
-    return this.recorder === null ? 0 : (performance.now() - this.startedAt) / 1000;
+    if (this.recorder === null) return 0;
+    const now = this.pausedAt >= 0 ? this.pausedAt : performance.now();
+    return (now - this.startedAt - this.pausedFor) / 1000;
   }
 
   start(canvas: HTMLCanvasElement, opts: RecorderOptions): void {
@@ -85,6 +90,26 @@ export class CanvasRecorder {
     recorder.start(1000);
     this.recorder = recorder;
     this.startedAt = performance.now();
+    this.pausedAt = -1;
+    this.pausedFor = 0;
+  }
+
+  get paused(): boolean {
+    return this.pausedAt >= 0;
+  }
+
+  /** Pauses with the transport: the file simply has no paused stretch. */
+  pause(): void {
+    if (this.recorder === null || this.pausedAt >= 0) return;
+    this.recorder.pause();
+    this.pausedAt = performance.now();
+  }
+
+  resume(): void {
+    if (this.recorder === null || this.pausedAt < 0) return;
+    this.recorder.resume();
+    this.pausedFor += performance.now() - this.pausedAt;
+    this.pausedAt = -1;
   }
 
   /** Stops and resolves with the finished file. */

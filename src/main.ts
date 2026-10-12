@@ -67,6 +67,7 @@ import {
 import { button, checkbox, gradientControl, row, selectOf, slider } from './ui/controls.ts';
 import { CentersOverlay } from './ui/centers-overlay.ts';
 import { createPanelTabs } from './ui/panel-tabs.ts';
+import { TransportBar } from './ui/transport.ts';
 import { DebugOverlay } from './ui/debug-overlay.ts';
 import { ChainPanel, type ViewSettings } from './ui/panel.ts';
 import { makePanelResizable } from './ui/panel-resize.ts';
@@ -242,10 +243,20 @@ function rebuild(): void {
 
 // ---- frame ----
 
-function frame(dt: number): void {
+// Transport (SPEC 10.1): paused = the clock stands and the pointer is
+// frozen; frames still run with dt = 0 so panel edits show. A step runs one
+// frame of exactly 1/fps, as the offline render does.
+let playing = true;
+let pendingStep = 0;
+
+function frame(rawDt: number): void {
   if (source === null || ramp === null) return;
-  input.tick(dt);
-  if (recorder.recording) {
+  const live = playing;
+  const dt = live ? rawDt : pendingStep;
+  pendingStep = 0;
+  transport.update(playing, recorder.recording, pipeline.ctx.time);
+  if (live) input.tick(dt);
+  if (live && recorder.recording) {
     // Pointer as this frame will see it, against the time the frame will have.
     takeTrack.push(pipeline.ctx.time + Math.min(Math.max(dt, 0), MAX_DT) - takeStart, input.pointer);
   }
@@ -264,7 +275,7 @@ function frame(dt: number): void {
   stageMs[3] = tm.post;
   stageMs[4] = renderMs;
   stageMs[5] = tm.total + renderMs;
-  overlay.sample(dt, stageMs);
+  if (live) overlay.sample(dt, stageMs);
   if (debugToggle.checked) {
     // Debug only: gridRect allocates, so not on the normal frame path.
     const dpr = window.devicePixelRatio || 1;
@@ -284,6 +295,24 @@ const loop = createLoop((dt) => {
     setStatus(`error: ${err instanceof Error ? err.message : String(err)}`);
   }
 });
+
+const transport = new TransportBar(stage, {
+  toStart: () => pipeline.restart(),
+  togglePlay: () => setPlaying(!playing),
+  step: () => {
+    // Recording keeps the take continuous: no steps while it runs.
+    if (!playing && !recorder.recording) pendingStep = 1 / video.fps;
+  },
+  toggleRecord: () => {
+    if (source !== null && rendering === null) void toggleRecording();
+  },
+});
+
+function setPlaying(on: boolean): void {
+  playing = on;
+  if (on) recorder.resume();
+  else recorder.pause();
+}
 
 function safeRebuild(): void {
   try {
@@ -318,6 +347,7 @@ async function load(file: File): Promise<void> {
   textField = null;
   applyBackdrop(); // a `picture` backdrop follows the new source
   stage.classList.add('has-source');
+  transport.visible = true;
   overlay.visible = debugToggle.checked;
   centers.visible = debugToggle.checked;
   copyButton.disabled = false;
@@ -418,7 +448,6 @@ view.append(
   row('quantize', quantizeSelect),
   sourceCharsRow,
   row('debug', debugToggle),
-  row('time', button('restart', () => pipeline.restart())),
 );
 
 // ---- panel: canvas (task 015) ----
@@ -889,6 +918,8 @@ async function toggleRecording(): Promise<void> {
   }
   const format = formats[video.format];
   if (format === undefined || source === null) return;
+  // Recording always runs: from a paused transport it starts playing.
+  setPlaying(true);
   if (video.fromStart) pipeline.restart();
   takeTrack.clear();
   takeStart = pipeline.ctx.time;

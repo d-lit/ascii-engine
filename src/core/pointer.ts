@@ -31,8 +31,9 @@ export function smoothToward(current: number, target: number, dt: number, tau: n
 
 /**
  * Tracks pointer events on an element and exposes them as a Pointer in cell
- * coordinates. Events only record raw state; `tick` turns movement into a
- * smoothed velocity once per frame, so it decays to 0 when the pointer stops.
+ * coordinates. Events only record raw state; `tick` applies it once per frame
+ * and turns movement into a smoothed velocity, so it decays to 0 when the
+ * pointer stops. Without `tick` (transport paused) the pointer stays frozen.
  */
 /** Grid size and where the grid lies in the element (fractions; default: all of it). */
 export interface PointerGrid {
@@ -45,10 +46,11 @@ export class PointerInput {
   readonly pointer: Pointer = { x: -1, y: -1, vx: 0, vy: 0, inside: false, down: false, clicked: false };
   private readonly el: HTMLElement;
   private readonly grid: () => PointerGrid;
-  private readonly raw = { x: -1, y: -1 };
+  private readonly raw = { x: -1, y: -1, inside: false, down: false, clicked: false };
   private prevX = -1;
   private prevY = -1;
   private hasPrev = false;
+  private left = false;
   private readonly abort = new AbortController();
 
   constructor(el: HTMLElement, grid: () => PointerGrid) {
@@ -64,13 +66,13 @@ export class PointerInput {
       (e) => {
         this.move(e);
         el.setPointerCapture(e.pointerId);
-        this.pointer.down = true;
-        this.pointer.clicked = true;
+        this.raw.down = true;
+        this.raw.clicked = true;
       },
       opts,
     );
     const up = (e: PointerEvent): void => {
-      this.pointer.down = false;
+      this.raw.down = false;
       // Touch has no hover: a lifted finger is gone.
       if (e.pointerType !== 'mouse') this.leave();
     };
@@ -82,8 +84,17 @@ export class PointerInput {
   /** Call once per frame before the pipeline. */
   tick(dt: number): void {
     const p = this.pointer;
-    p.x = this.raw.x;
-    p.y = this.raw.y;
+    const raw = this.raw;
+    p.x = raw.x;
+    p.y = raw.y;
+    p.down = raw.down;
+    // A click is delivered once; the pipeline clears it after the frame.
+    if (raw.clicked) p.clicked = true;
+    raw.clicked = false;
+    p.inside = raw.inside;
+    // Left and came back since the last frame: no velocity across the jump.
+    if (this.left) this.hasPrev = false;
+    this.left = false;
 
     let tx = 0;
     let ty = 0;
@@ -110,11 +121,11 @@ export class PointerInput {
       ? r
       : { left: r.left + area.x * r.width, top: r.top + area.y * r.height, width: area.w * r.width, height: area.h * r.height };
     clientToCell(e.clientX, e.clientY, rect, cols, rows, this.raw);
-    this.pointer.inside = true;
+    this.raw.inside = true;
   }
 
   private leave(): void {
-    this.pointer.inside = false;
-    this.hasPrev = false;
+    this.raw.inside = false;
+    this.left = true;
   }
 }
