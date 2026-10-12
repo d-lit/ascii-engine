@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "name": "Beat burst",
+  "ramp": "blocks",
+  "polarity": "light-on-dark",
+  "color": {
+    "mode": "gradient",
+    "stops": [
+      { "pos": 0, "color": "#05010f" },
+      { "pos": 0.35, "color": "#1b3fd1" },
+      { "pos": 0.7, "color": "#2ff7ff" },
+      { "pos": 1, "color": "#ffffff" }
+    ]
+  },
+  "chain": [
+    {
+      "effect": "liquid",
+      "params": {
+        "amplitude": { "audio": "level", "min": 0.5, "max": 2, "release": 0.5 }
+      }
+    },
+    {
+      "effect": "particles",
+      "params": {
+        "intro": "rain",
+        "stiffness": 16,
+        "damping": 4,
+        "push": 200,
+        "pushRadius": 7,
+        "explode": 80,
+        "beat": 70,
+        "center": "center",
+        "radius": 55
+      }
+    },
+    {
+      "effect": "glow",
+      "params": {
+        "center": "center",
+        "color": "#2ff7ff",
+        "radius": 22,
+        "strength": { "env": [[0, 0.8], [0.3, 0.1]], "ease": "smooth", "on": "beat" },
+        "falloff": 1.6
+      }
+    }
+  ]
+}

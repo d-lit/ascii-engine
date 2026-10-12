@@ -14,14 +14,14 @@ Turn a picture into living ASCII art in the browser: ripples that follow the cur
   - *Displace* — `ripple`, `swirl`, `lens`, `liquid`, `glitch-rows`, `shake`;
   - *Cell* — `wave`, `pulse`, `erosion`, `decode`;
   - *Colour* — `tint`, `hue-cycle`, `glow`;
-  - *System* — `particles`: characters fly off their cells and spring back (more systems coming).
+  - *System* — `particles`: the picture assembles from scattered characters, the cursor pushes them aside, clicks and beats blast them apart, springs bring them home (more systems coming).
 
   Add any of them (even twice), reorder, mix, mask.
 - **Everything moves.** Any numeric parameter can be a constant, an LFO (sine, triangle, saw, square, noise) or a looping envelope. Effects have strength (`mix`) and masks (radial, rectangle, brightness, alpha). Effect centres sit on a 3×3 grid or anywhere (even off the edge), follow the cursor, or move by themselves: orbit, Lissajous, wander, sweep, bounce, keyframes — and hand over smoothly to the cursor when it arrives.
 - **Canvas.** Pick a pixel frame — 1080×1080, 1080×1350, 1080×1920, 1920×1080 or your own — and crop both the source and the backdrop into it (fit, position, zoom). Screen, recording, render and PNG all use it.
 - **Colour and layers.** Glyph colour: mono, the photo's own colours, or a gradient by brightness. Cell background plates. Backdrop: theme colour, any colour (chroma key), transparent, or an image — including the source photo itself, so effects can dissolve the ASCII into the picture.
 - **Music.** Load a track: it plays with a transport (pause, frame step, seek), any parameter can follow its bass, mids, highs or loudness, and beats launch ripples and restart envelopes — the same on screen and in the render, with the sound in the video.
-- **Presets.** Fourteen built-in looks, save and load your own as JSON, or press *random* to explore.
+- **Presets.** Sixteen built-in looks, save and load your own as JSON, or press *random* to explore.
 - **Export.**
   - text (`.txt` / clipboard);
   - PNG, with transparency;

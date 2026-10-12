@@ -16,6 +16,8 @@ export interface RandomChainOptions {
   maxEffects?: number;
   /** Most displace effects in one chain; several at once turn to mush. */
   maxDisplace?: number;
+  /** Most systems (particles...) in one chain: they take over the picture. */
+  maxSystems?: number;
   /** Chance that one number param of an effect gets an LFO. */
   lfoChance?: number;
   maskChance?: number;
@@ -27,6 +29,7 @@ const DEFAULTS: Required<RandomChainOptions> = {
   minEffects: 2,
   maxEffects: 4,
   maxDisplace: 2,
+  maxSystems: 1,
   lfoChance: 0.35,
   maskChance: 0.2,
   mixChance: 0.15,
@@ -148,10 +151,13 @@ export function randomChain(
   const want = Math.min(pool.length, o.minEffects + Math.floor(rand() * (span + 1)));
   const chosen: AnyEffectDef[] = [];
   let displace = 0;
+  let systems = 0;
   for (const def of pool) {
     if (chosen.length >= want) break;
-    // Systems take over the picture; added by hand for now (phase 5).
-    if (def.kind === 'system') continue;
+    if (def.kind === 'system') {
+      if (systems >= o.maxSystems) continue;
+      systems++;
+    }
     if (def.kind === 'displace') {
       if (displace >= o.maxDisplace) continue;
       displace++;
