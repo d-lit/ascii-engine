@@ -88,4 +88,25 @@ describe('image import math', () => {
     expect(field.lum[1]).toBeCloseTo(200 / 255);
     expect([...field.alpha]).toEqual([1, 1]);
   });
+
+  it('places the picture: cover crops by position, contain leaves empty cells', () => {
+    // 4x1 picture: dark, dark, light, light.
+    const v = [0, 0, 255, 255];
+    const pixels = new Uint8ClampedArray(v.flatMap((c) => [c, c, c, 255]));
+    const context = { drawImage: vi.fn(), getImageData: vi.fn(() => ({ data: pixels })) };
+    const canvas = { width: 0, height: 0, getContext: vi.fn(() => context) };
+    vi.stubGlobal('document', { createElement: vi.fn(() => canvas) });
+    const bitmap = { width: 4, height: 1 } as unknown as ImageBitmap;
+
+    // 1x1 grid, square cells: cover shows a 1x1 part of the picture.
+    const left = importImage(bitmap, { cols: 1, rows: 1, cellAspect: 1, place: { fit: 'cover', x: 0, y: 0.5, zoom: 1 } });
+    const right = importImage(bitmap, { cols: 1, rows: 1, cellAspect: 1, place: { fit: 'cover', x: 1, y: 0.5, zoom: 1 } });
+    expect(left.lum[0]).toBeCloseTo(0);
+    expect(right.lum[0]).toBeCloseTo(1);
+
+    // 1x4 grid (square area): contain puts the strip in the second row-ish band.
+    const tall = importImage(bitmap, { cols: 1, rows: 4, cellAspect: 4, place: { fit: 'contain', x: 0.5, y: 0, zoom: 1 } });
+    expect(tall.alpha[0]).toBeCloseTo(1);
+    expect([...tall.alpha].slice(1)).toEqual([0, 0, 0]);
+  });
 });

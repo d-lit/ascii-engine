@@ -1,3 +1,5 @@
+import { DEFAULT_CROP, placeRect, type Crop } from '../core/placement.ts';
+
 /** How an image backdrop is placed; `grid` lays it exactly under the glyph grid. */
 export type ImageFit = 'grid' | 'cover' | 'contain' | 'stretch';
 export const IMAGE_FITS: readonly ImageFit[] = ['grid', 'cover', 'contain', 'stretch'];
@@ -47,22 +49,22 @@ export interface Rect {
   h: number;
 }
 
-/** Where the image goes in a `frameW x frameH` frame whose glyph grid occupies `grid`. */
-export function fitRect(fit: ImageFit, imgW: number, imgH: number, frameW: number, frameH: number, grid: Rect): Rect {
-  switch (fit) {
-    case 'grid':
-      return { ...grid };
-    case 'stretch':
-      return { x: 0, y: 0, w: frameW, h: frameH };
-    case 'cover':
-    case 'contain': {
-      const scale =
-        fit === 'cover' ? Math.max(frameW / imgW, frameH / imgH) : Math.min(frameW / imgW, frameH / imgH);
-      const w = imgW * scale;
-      const h = imgH * scale;
-      return { x: (frameW - w) / 2, y: (frameH - h) / 2, w, h };
-    }
-  }
+/**
+ * Where the image goes in a `frameW x frameH` frame: `grid` takes `picture`,
+ * where the source picture lies; the other fits are cropped by `crop`
+ * (session state, task 015).
+ */
+export function fitRect(
+  fit: ImageFit,
+  imgW: number,
+  imgH: number,
+  frameW: number,
+  frameH: number,
+  picture: Rect,
+  crop: Crop = DEFAULT_CROP,
+): Rect {
+  if (fit === 'grid') return { ...picture };
+  return placeRect(imgW, imgH, frameW, frameH, { fit, ...crop });
 }
 
 export interface BackdropImage {
@@ -82,7 +84,8 @@ export function prepareBackdrop(
   backdrop: Backdrop,
   themeBg: string,
   image: BackdropImage | null,
-  grid: Rect,
+  picture: Rect,
+  crop: Crop = DEFAULT_CROP,
 ): void {
   const ctx = target.getContext('2d', { alpha: true });
   if (!ctx) throw new Error('prepareBackdrop: no 2d context');
@@ -94,7 +97,7 @@ export function prepareBackdrop(
   ctx.fillRect(0, 0, width, height);
   if (backdrop.kind !== 'image' || image === null) return;
 
-  const r = fitRect(backdrop.fit, image.width, image.height, width, height, grid);
+  const r = fitRect(backdrop.fit, image.width, image.height, width, height, picture, crop);
   ctx.save();
   // Clip to the image rect so blur does not bleed into letterbox bars.
   ctx.beginPath();
@@ -130,7 +133,7 @@ export function backdropFill(backdrop: Backdrop, themeBg: string): string | null
 
 /**
  * Builds one frame: the backdrop (a prepared canvas, a fill colour, or
- * nothing), then the glyph layer at (x, y). The browser does the alpha
+ * nothing), then the glyph layer at (x, y), scaled to `w x h` when given. The browser does the alpha
  * blending, so the compositor never blends per pixel.
  */
 export function paintFrame(
@@ -139,6 +142,8 @@ export function paintFrame(
   under: HTMLCanvasElement | string | null,
   x: number,
   y: number,
+  w?: number,
+  h?: number,
 ): void {
   const { width, height } = ctx.canvas;
   ctx.clearRect(0, 0, width, height);
@@ -148,5 +153,9 @@ export function paintFrame(
   } else if (under !== null) {
     ctx.drawImage(under, 0, 0);
   }
-  ctx.drawImage(layer, x, y);
+  if (w === undefined || h === undefined) ctx.drawImage(layer, x, y);
+  else {
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(layer, x, y, w, h);
+  }
 }

@@ -1,14 +1,10 @@
-import type { Rgb } from '../core/color.ts';
-import type { Field, FieldMeta, Polarity } from '../core/field.ts';
-import { measureRamp, type QuantizeMode } from '../core/ramp.ts';
+import type { Field, FieldMeta } from '../core/field.ts';
 import type { EffectLookup, PresetEffect } from '../presets/preset.ts';
 import { applyChain } from '../presets/preset.ts';
 import type { ColorSettings } from '../pipeline/colorize.ts';
 import { createPointer, Pipeline } from '../pipeline/pipeline.ts';
-import { getAtlas } from '../render/atlas.ts';
-import { fitCell } from '../render/canvas2d.ts';
-import { paintFrame, prepareBackdrop, type Backdrop, type BackdropImage } from '../render/backdrop.ts';
-import { Compositor } from '../render/compositor.ts';
+import { layoutFrame, type FrameLayout } from '../render/canvas2d.ts';
+import { createFramePainter, type FrameLook } from './frame-painter.ts';
 import type { PointerTrack } from './pointer-track.ts';
 
 /** Output frame sizes; `screen` keeps the on-screen canvas size. */
@@ -35,52 +31,44 @@ export const OFFLINE_FORMATS: readonly OfflineFormat[] = [
   { ext: 'webm', codec: 'vp9', label: 'WebM · VP9', alpha: true },
 ];
 
-/** Which offline formats this browser can encode at this size and bitrate. */
-export async function probeOfflineFormats(width: number, height: number, bitsPerSecond: number): Promise<boolean[]> {
-  const mb = await import('./mux.ts');
-  const quality = new mb.Quality(bitsPerSecond);
-  return Promise.all(OFFLINE_FORMATS.map((f) => mb.canEncodeVideo(f.codec, { width, height, quality })));
-}
-
-export interface FrameLayout {
-  cellW: number;
-  cellH: number;
-  /** Grid offset inside the frame, pixels; the rest is background. */
-  offsetX: number;
-  offsetY: number;
-}
-
 /**
- * Largest aspect-correct integral cell that fits the grid into `width x
- * height`, grid centred (letterboxed). Offsets are even so the grid sits on
- * the same pixel grid as the encoder's chroma blocks.
+ * Whether a format encodes here: `ok`; `size` — the browser has the encoder,
+ * but not for this size / bitrate / fps; `none` — no encoder at all (e.g.
+ * Chromium builds without proprietary codecs have no H.264).
  */
-export function layoutFrame(cols: number, rows: number, cellAspect: number, width: number, height: number): FrameLayout {
-  const cell = fitCell(Math.floor(width / cols), Math.floor(height / rows), cellAspect);
-  const offsetX = ((width - cols * cell.w) >> 2) * 2;
-  const offsetY = ((height - rows * cell.h) >> 2) * 2;
-  return { cellW: cell.w, cellH: cell.h, offsetX, offsetY };
+export type FormatSupport = 'ok' | 'size' | 'none';
+
+/** Reference job every real encoder handles: tells `size` from `none`. */
+const REFERENCE = { width: 1280, height: 720, bitsPerSecond: 4_000_000, fps: 30 };
+
+/** Support of each offline format at this size, bitrate and fps. */
+export async function probeOfflineFormats(
+  width: number,
+  height: number,
+  bitsPerSecond: number,
+  fps: number,
+): Promise<FormatSupport[]> {
+  const mb = await import('./mux.ts');
+  const can = (codec: OfflineFormat['codec'], w: number, h: number, bps: number, frameRate: number): Promise<boolean> =>
+    mb.canEncodeVideo(codec, { width: w, height: h, quality: new mb.Quality(bps), frameRate });
+  return Promise.all(
+    OFFLINE_FORMATS.map(async (f) => {
+      if (await can(f.codec, width, height, bitsPerSecond, fps)) return 'ok';
+      const r = REFERENCE;
+      return (await can(f.codec, r.width, r.height, r.bitsPerSecond, r.fps)) ? 'size' : 'none';
+    }),
+  );
 }
 
-export interface OfflineJob {
+export { layoutFrame, type FrameLayout };
+
+/** The look of the frame (`cols`/`rows`/`cellAspect`/`polarity` come from the source). */
+export interface OfflineJob extends Omit<FrameLook, 'cols' | 'rows' | 'cellAspect' | 'polarity'> {
   source: Field;
   meta: FieldMeta;
   chain: readonly PresetEffect[];
   lookup: EffectLookup;
   color: ColorSettings;
-  theme: { bg: string; fg: string };
-  ink: Rgb;
-  /** Under the glyph layer; `transparent` keeps alpha only with an alpha-capable format (step 2). */
-  backdrop: Backdrop;
-  /** Image for an image backdrop; session state, not part of presets. */
-  backdropImage: BackdropImage | null;
-  rampChars: string;
-  family: string;
-  weight: number;
-  useSourceChars: boolean;
-  quantizeMode: QuantizeMode;
-  width: number;
-  height: number;
   fps: number;
   seconds: number;
   bitsPerSecond: number;
@@ -110,34 +98,20 @@ export async function renderOffline(job: OfflineJob, onProgress: ProgressFn, sig
   // The chosen format or nothing: no silent fallback to another container.
   const quality = new mb.Quality(job.bitsPerSecond);
   const { codec, ext } = job.format;
-  if (!(await mb.canEncodeVideo(codec, { width, height, quality }))) {
+  if (!(await mb.canEncodeVideo(codec, { width, height, quality, frameRate: fps }))) {
     throw new Error(`this browser cannot encode ${job.format.label} at ${width}×${height}`);
   }
   const useMp4 = ext === 'mp4';
 
   // Frame canvas and compositor at the target size.
-  const layout = layoutFrame(cols, rows, job.meta.cellAspect, width, height);
-  const font = { family: job.family, weight: job.weight, cellW: layout.cellW, cellH: layout.cellH };
-  const ramp = measureRamp(job.rampChars, font);
-  const atlas = getAtlas(font);
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d', { alpha: true });
-  const compositor = new Compositor(cols, rows, layout.cellW, layout.cellH);
-  const layer = document.createElement('canvas');
-  layer.width = compositor.width;
-  layer.height = compositor.height;
-  const layerCtx = layer.getContext('2d', { alpha: true });
-  if (!ctx || !layerCtx) throw new Error('renderOffline: no 2d context');
-  compositor.setInk(job.ink);
-  const image = new ImageData(compositor.pixels, compositor.width, compositor.height);
-  // Static backdrop at the target size; the grid rect keeps `grid` fit aligned.
-  const under = document.createElement('canvas');
-  under.width = width;
-  under.height = height;
-  const grid = { x: layout.offsetX, y: layout.offsetY, w: compositor.width, h: compositor.height };
-  prepareBackdrop(under, job.backdrop, job.theme.bg, job.backdropImage, grid);
+  const painter = createFramePainter({
+    ...job,
+    cols,
+    rows,
+    cellAspect: job.meta.cellAspect,
+    polarity: job.meta.polarity,
+  });
+  const canvas = painter.canvas;
 
   // Fresh pipeline with the same chain and default seed: replays the live take.
   const pointer = createPointer();
@@ -157,7 +131,6 @@ export async function renderOffline(job: OfflineJob, onProgress: ProgressFn, sig
   output.addVideoTrack(videoSource, { frameRate: fps });
   await output.start();
 
-  const polarity: Polarity = job.meta.polarity;
   const step = 1 / fps;
   const total = Math.max(1, Math.round(job.seconds * fps));
   try {
@@ -165,14 +138,7 @@ export async function renderOffline(job: OfflineJob, onProgress: ProgressFn, sig
       if (signal.aborted) throw new DOMException('render cancelled', 'AbortError');
       const t = (i + 1) * step;
       if (job.track !== null) job.track.apply(t, t - step, pointer);
-      const work = pipeline.frame(step);
-      compositor.compose(work, ramp, polarity, job.useSourceChars, job.quantizeMode, atlas);
-      const { dirtyTop, dirtyBottom } = compositor;
-      if (dirtyBottom > dirtyTop) {
-        layerCtx.putImageData(image, 0, 0, 0, dirtyTop, compositor.width, dirtyBottom - dirtyTop);
-      }
-      // Every frame is a full picture for the encoder: backdrop, then glyphs.
-      paintFrame(ctx, layer, under, layout.offsetX, layout.offsetY);
+      painter.paint(pipeline.frame(step));
       await videoSource.add(i * step, step);
       onProgress(i + 1, total);
     }

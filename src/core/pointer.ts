@@ -34,17 +34,24 @@ export function smoothToward(current: number, target: number, dt: number, tau: n
  * coordinates. Events only record raw state; `tick` turns movement into a
  * smoothed velocity once per frame, so it decays to 0 when the pointer stops.
  */
+/** Grid size and where the grid lies in the element (fractions; default: all of it). */
+export interface PointerGrid {
+  cols: number;
+  rows: number;
+  area?: { x: number; y: number; w: number; h: number };
+}
+
 export class PointerInput {
   readonly pointer: Pointer = { x: -1, y: -1, vx: 0, vy: 0, inside: false, down: false, clicked: false };
   private readonly el: HTMLElement;
-  private readonly grid: () => { cols: number; rows: number };
+  private readonly grid: () => PointerGrid;
   private readonly raw = { x: -1, y: -1 };
   private prevX = -1;
   private prevY = -1;
   private hasPrev = false;
   private readonly abort = new AbortController();
 
-  constructor(el: HTMLElement, grid: () => { cols: number; rows: number }) {
+  constructor(el: HTMLElement, grid: () => PointerGrid) {
     this.el = el;
     this.grid = grid;
     el.style.touchAction = 'none';
@@ -97,8 +104,12 @@ export class PointerInput {
   }
 
   private move(e: PointerEvent): void {
-    const { cols, rows } = this.grid();
-    clientToCell(e.clientX, e.clientY, this.el.getBoundingClientRect(), cols, rows, this.raw);
+    const { cols, rows, area } = this.grid();
+    const r = this.el.getBoundingClientRect();
+    const rect = area === undefined
+      ? r
+      : { left: r.left + area.x * r.width, top: r.top + area.y * r.height, width: area.w * r.width, height: area.h * r.height };
+    clientToCell(e.clientX, e.clientY, rect, cols, rows, this.raw);
     this.pointer.inside = true;
   }
 

@@ -75,20 +75,26 @@ export function parsePathPoints(text: string): Array<[number, number, number]> |
   return out;
 }
 
-/** 3x3 anchors plus x / y sliders, editing `pos` in place. */
-function positionEditor(caption: string, pos: Vec2, changed: () => void): HTMLElement[] {
+/** 3x3 anchors plus x / y sliders (`min`..`max`), editing `pos` in place. */
+export function positionEditor(
+  caption: string,
+  pos: Vec2,
+  changed: () => void,
+  min: number = POINT_MIN,
+  max: number = POINT_MAX,
+): HTMLElement[] {
   const grid = document.createElement('div');
   grid.className = 'point-grid';
   const cells: HTMLButtonElement[] = [];
   const mark = (): void => {
     cells.forEach((el, k) => el.classList.toggle('on', pos.x === ANCHORS[k % 3] && pos.y === ANCHORS[Math.floor(k / 3)]));
   };
-  const [xs, xo] = slider(POINT_MIN, POINT_MAX, 0.01, pos.x, (n) => {
+  const [xs, xo] = slider(min, max, 0.01, pos.x, (n) => {
     pos.x = n;
     mark();
     changed();
   });
-  const [ys, yo] = slider(POINT_MIN, POINT_MAX, 0.01, pos.y, (n) => {
+  const [ys, yo] = slider(min, max, 0.01, pos.y, (n) => {
     pos.y = n;
     mark();
     changed();

@@ -2,7 +2,16 @@ import './style.css';
 import { createField, type Field, type FieldMeta, type Polarity, type WorkBuffer } from './core/field.ts';
 import { createLoop } from './core/loop.ts';
 import { PointerInput } from './core/pointer.ts';
-import { computeRows, importImage } from './core/import-image.ts';
+import { computeRows, importPixels, placeInGrid, readPixels, type Pixels } from './core/import-image.ts';
+import {
+  DEFAULT_CROP,
+  DEFAULT_PLACEMENT,
+  PLACE_FITS,
+  ZOOM_MAX,
+  ZOOM_MIN,
+  type Crop,
+  type Placement,
+} from './core/placement.ts';
 import { importText, normalizeText } from './core/import-text.ts';
 import {
   BUILTIN_RAMP_CHARS,
@@ -24,6 +33,7 @@ import {
 } from './pipeline/colorize.ts';
 import { MAX_DT, Pipeline } from './pipeline/pipeline.ts';
 import { PointerTrack } from './export/pointer-track.ts';
+import { createFramePainter, type FrameLook } from './export/frame-painter.ts';
 import {
   FRAME_SIZES,
   OFFLINE_FORMATS,
@@ -35,6 +45,7 @@ import { chainToPreset } from './presets/preset.ts';
 import { MAX_STOPS } from './presets/preset.ts';
 import { parseHex } from './core/color.ts';
 import { Canvas2DRenderer } from './render/canvas2d.ts';
+import { positionEditor } from './ui/point-control.ts';
 import { exportText } from './render/export-text.ts';
 import {
   BACKDROP_KINDS,
@@ -55,6 +66,7 @@ import {
 } from './export/video-recorder.ts';
 import { button, checkbox, gradientControl, row, selectOf, slider } from './ui/controls.ts';
 import { CentersOverlay } from './ui/centers-overlay.ts';
+import { createPanelTabs } from './ui/panel-tabs.ts';
 import { DebugOverlay } from './ui/debug-overlay.ts';
 import { ChainPanel, type ViewSettings } from './ui/panel.ts';
 import { makePanelResizable } from './ui/panel-resize.ts';
@@ -63,6 +75,13 @@ const CELL_ASPECT = 0.55;
 const FONT_FAMILY = "ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
 const COLS_MIN = 20;
 const COLS_MAX = 300;
+// Canvas (task 015): `auto` follows the source, the rest are pixel frames.
+const CANVAS_SIZES = ['auto', '1080×1080', '1080×1350', '1080×1920', '1920×1080', 'custom'] as const;
+type CanvasSize = (typeof CANVAS_SIZES)[number];
+const CANVAS_MIN = 64;
+const CANVAS_MAX = 4096;
+// Longest side of the pixels kept for re-importing the source on crop changes.
+const IMPORT_MAX_SIDE = 2048;
 
 type Source =
   | { kind: 'image'; bitmap: ImageBitmap; name: string }
@@ -77,6 +96,9 @@ interface Settings {
   trimRight: boolean;
   color: ColorSettings;
   backdrop: Backdrop;
+  /** Session settings, never in presets: the canvas and the source crop. */
+  canvas: { size: CanvasSize; width: number; height: number };
+  place: Placement;
 }
 
 const settings: Settings = {
@@ -88,7 +110,18 @@ const settings: Settings = {
   trimRight: true,
   color: { mode: 'mono', stops: [...DEFAULT_STOPS] },
   backdrop: { kind: 'theme' },
+  canvas: { size: 'auto', width: 1080, height: 1080 },
+  place: { ...DEFAULT_PLACEMENT },
 };
+
+/** Fixed canvas in pixels, or null for `auto` (the source's own aspect). */
+function canvasFrame(): { width: number; height: number } | null {
+  const c = settings.canvas;
+  if (c.size === 'auto') return null;
+  if (c.size === 'custom') return { width: c.width, height: c.height };
+  const [w, h] = c.size.split('×').map(Number);
+  return { width: w ?? 1080, height: h ?? 1080 };
+}
 
 function el<T extends HTMLElement>(selector: string): T {
   const node = document.querySelector<T>(selector);
@@ -115,9 +148,11 @@ const renderer = new Canvas2DRenderer(canvas, {
 });
 
 let source: Source | null = null;
-// Image import is the expensive step; reuse it until the file or cols change.
+// Source pixels, read once per file (scaled down); imports reuse them.
+let sourcePixels: Pixels | null = null;
+// Image import is the expensive step; reuse it until the grid or the crop change.
 let imageField: Field | null = null;
-let imageFieldCols = 0;
+let imageFieldKey = '';
 // Text luminance depends on ramp and polarity; reuse while those hold.
 let textField: Field | null = null;
 let textFieldRamp: Ramp | null = null;
@@ -129,7 +164,12 @@ let meta: FieldMeta = { cellAspect: CELL_ASPECT, polarity: settings.polarity };
 // Last rendered frame, for export.
 let lastWork: WorkBuffer | null = null;
 
-const input = new PointerInput(canvas, () => ({ cols: field?.cols ?? 1, rows: field?.rows ?? 1 }));
+const input = new PointerInput(canvas, () => {
+  const g = renderer.gridRect;
+  const w = canvas.width || 1;
+  const h = canvas.height || 1;
+  return { cols: field?.cols ?? 1, rows: field?.rows ?? 1, area: { x: g.x / w, y: g.y / h, w: g.w / w, h: g.h / h } };
+});
 
 // The pipeline exists from the start (on an empty 1x1 field), so the chain and
 // presets can be edited before any picture is loaded.
@@ -145,12 +185,15 @@ centers.visible = false;
 
 function gridSize(src: Source): { cols: number; rows: number } {
   if (src.kind === 'image') {
-    const { width, height } = src.bitmap;
+    // The canvas sets the grid's aspect; `auto` takes the picture's.
+    const { width, height } = canvasFrame() ?? src.bitmap;
     return { cols: settings.cols, rows: computeRows(width, height, settings.cols, CELL_ASPECT) };
   }
   const lines = normalizeText(src.text);
   return { cols: Math.max(1, lines[0]?.length ?? 0), rows: Math.max(1, lines.length) };
 }
+
+const FULL_GRID = { x: 0, y: 0, w: 1, h: 1 };
 
 function rebuild(): void {
   if (source === null) return;
@@ -160,18 +203,22 @@ function rebuild(): void {
   const { cols, rows } = gridSize(source);
 
   // Cell size depends on the grid; ramp densities depend on the cell size.
-  renderer.resize(cols, rows, CELL_ASPECT);
+  renderer.resize(cols, rows, CELL_ASPECT, canvasFrame());
   const font = renderer.font;
   ramp = measureRamp(BUILTIN_RAMP_CHARS[settings.ramp], font);
 
   let next: Field;
   if (source.kind === 'image') {
-    if (imageField === null || imageFieldCols !== settings.cols) {
+    sourcePixels ??= readPixels(source.bitmap, IMPORT_MAX_SIDE);
+    const place = settings.place;
+    const key = `${cols}×${rows} ${place.fit} ${place.x} ${place.y} ${place.zoom}`;
+    if (imageField === null || imageFieldKey !== key) {
       // Colour is always imported; the pipeline copies it only when a colour mode needs it.
-      imageField = importImage(source.bitmap, { cols: settings.cols, cellAspect: CELL_ASPECT, color: true });
-      imageFieldCols = settings.cols;
+      imageField = importPixels(sourcePixels, { cols, rows, cellAspect: CELL_ASPECT, color: true, place });
+      imageFieldKey = key;
     }
     next = imageField;
+    renderer.setPicture(placeInGrid(sourcePixels.width, sourcePixels.height, cols, rows, CELL_ASPECT, place));
   } else {
     if (textField === null || textFieldRamp !== ramp || textFieldPolarity !== settings.polarity) {
       textField = importText(source.text, ramp, meta, createDensityMeasurer(font)).field;
@@ -179,6 +226,7 @@ function rebuild(): void {
       textFieldPolarity = settings.polarity;
     }
     next = textField;
+    renderer.setPicture(FULL_GRID);
   }
 
   // Effects restart only when the picture itself changes (DECISIONS 012).
@@ -206,6 +254,7 @@ function frame(dt: number): void {
 
   const t0 = performance.now();
   renderer.render(work, ramp, meta);
+  if (capturing) copyToCapture();
   const renderMs = performance.now() - t0;
 
   const tm = pipeline.timings;
@@ -217,10 +266,12 @@ function frame(dt: number): void {
   stageMs[5] = tm.total + renderMs;
   overlay.sample(dt, stageMs);
   if (debugToggle.checked) {
-    // Debug only: renderer.font allocates, so not on the normal frame path.
+    // Debug only: gridRect allocates, so not on the normal frame path.
     const dpr = window.devicePixelRatio || 1;
-    const font = renderer.font;
-    centers.draw(pipeline, font.cellW / dpr, font.cellH / dpr);
+    const g = renderer.gridRect;
+    const cols = field?.cols ?? 1;
+    const rows = field?.rows ?? 1;
+    centers.draw(pipeline, g.w / cols / dpr, g.h / rows / dpr, g.x / dpr, g.y / dpr);
   }
 }
 
@@ -263,6 +314,7 @@ async function load(file: File): Promise<void> {
     return;
   }
   imageField = null;
+  sourcePixels = null;
   textField = null;
   applyBackdrop(); // a `picture` backdrop follows the new source
   stage.classList.add('has-source');
@@ -274,6 +326,7 @@ async function load(file: File): Promise<void> {
   recordButton.disabled = false;
   renderButton.disabled = false;
   colsRow.hidden = source.kind !== 'image';
+  pictureBox.hidden = source.kind !== 'image';
   sourceCharsRow.hidden = source.kind !== 'text';
   safeRebuild();
 }
@@ -292,16 +345,20 @@ stage.addEventListener('drop', (e) => {
 
 // ---- panel: view ----
 
-function section(title: string): HTMLElement {
+// Three tabs keep the panel short: what is shown, how it moves, how it leaves.
+const tabs = createPanelTabs(panel, ['source', 'effects', 'export'] as const);
+type Tab = 'source' | 'effects' | 'export';
+
+function section(title: string, tab: Tab): HTMLElement {
   const box = document.createElement('section');
   const h = document.createElement('h3');
   h.textContent = title;
   box.append(h);
-  panel.append(box);
+  tabs.page(tab).append(box);
   return box;
 }
 
-const view = section('view');
+const view = section('view', 'source');
 
 const fileInput = document.createElement('input');
 fileInput.type = 'file';
@@ -364,6 +421,75 @@ view.append(
   row('time', button('restart', () => pipeline.restart())),
 );
 
+// ---- panel: canvas (task 015) ----
+
+const canvasBox = section('canvas', 'source');
+
+/** Pixel input for a custom canvas side; even, within limits. */
+function sideInput(get: () => number, set: (n: number) => void): HTMLInputElement {
+  const inputEl = document.createElement('input');
+  inputEl.type = 'number';
+  inputEl.min = String(CANVAS_MIN);
+  inputEl.max = String(CANVAS_MAX);
+  inputEl.step = '2';
+  inputEl.value = String(get());
+  inputEl.addEventListener('change', () => {
+    const n = Math.round(Number(inputEl.value) / 2) * 2;
+    const v = Number.isFinite(n) ? Math.min(CANVAS_MAX, Math.max(CANVAS_MIN, n)) : get();
+    inputEl.value = String(v);
+    set(v);
+  });
+  return inputEl;
+}
+
+function canvasChanged(): void {
+  customRow.hidden = settings.canvas.size !== 'custom';
+  offlineSizeRow.hidden = canvasFrame() !== null;
+  safeRebuild();
+  void refreshOfflineFormats();
+}
+
+const customRow = row(
+  'pixels',
+  sideInput(() => settings.canvas.width, (n) => {
+    settings.canvas.width = n;
+    canvasChanged();
+  }),
+  Object.assign(document.createElement('span'), { textContent: '×' }),
+  sideInput(() => settings.canvas.height, (n) => {
+    settings.canvas.height = n;
+    canvasChanged();
+  }),
+);
+customRow.classList.add('canvas-pixels');
+customRow.hidden = true;
+
+// How the source picture sits in the grid: fit, which part shows, zoom.
+const pictureBox = document.createElement('div');
+pictureBox.hidden = true;
+const place = settings.place;
+pictureBox.append(
+  subhead('source picture'),
+  row('fit', selectOf(PLACE_FITS, place.fit, (f) => {
+    place.fit = f;
+    safeRebuild();
+  })),
+  ...positionEditor('crop', place, () => safeRebuild(), 0, 1),
+  row('zoom', ...slider(ZOOM_MIN, ZOOM_MAX, 0.01, place.zoom, (n) => {
+    place.zoom = n;
+    safeRebuild();
+  })),
+);
+
+canvasBox.append(
+  row('size', selectOf(CANVAS_SIZES, settings.canvas.size, (v) => {
+    settings.canvas.size = v;
+    canvasChanged();
+  })),
+  customRow,
+  pictureBox,
+);
+
 // ---- panel: colour ----
 
 /** Pushes the colour mode and the theme ink to the pipeline (DECISIONS 015). */
@@ -371,7 +497,7 @@ function applyColor(): void {
   pipeline.setColor(settings.color, parseHex(THEMES[settings.polarity].fg));
 }
 
-const colorBox = section('color');
+const colorBox = section('color', 'source');
 const gradientBox = document.createElement('div');
 const colorModeSelect = selectOf(COLOR_MODES, settings.color.mode, (m) => {
   settings.color.mode = m;
@@ -420,8 +546,10 @@ let backdropColor = '#00b140';
 // itself (session state: never stored in presets).
 let imageBackdrop: ImageBackdrop = { ...DEFAULT_IMAGE_BACKDROP };
 let customBackdrop: ImageBitmap | null = null;
+// Which part of an image backdrop shows (cover / contain / stretch); session only.
+const backdropCrop: Crop = { ...DEFAULT_CROP };
 
-const backgroundBox = section('background');
+const backgroundBox = section('background', 'source');
 const backdropColorInput = document.createElement('input');
 backdropColorInput.type = 'color';
 backdropColorInput.value = backdropColor;
@@ -439,7 +567,7 @@ function resolveBackdropImage(): BackdropImage | null {
 }
 
 function applyBackdrop(): void {
-  renderer.setBackdrop(settings.backdrop, resolveBackdropImage());
+  renderer.setBackdrop(settings.backdrop, resolveBackdropImage(), backdropCrop);
   backdropColorRow.hidden = settings.backdrop.kind !== 'color';
   renderImageControls();
   // Sections created later (video formats) listen for this.
@@ -477,7 +605,7 @@ function renderImageControls(): void {
     imageBox.replaceChildren();
     return;
   }
-  const refresh = (): void => renderer.setBackdrop(b, resolveBackdropImage());
+  const refresh = (): void => renderer.setBackdrop(b, resolveBackdropImage(), backdropCrop);
   const missing =
     resolveBackdropImage() !== null
       ? null
@@ -488,6 +616,16 @@ function renderImageControls(): void {
   note.className = 'hint';
   note.textContent = missing ?? '';
   note.hidden = missing === null;
+  // `grid` follows the source picture; the other fits have their own crop.
+  const cropBox = document.createElement('div');
+  cropBox.hidden = b.fit === 'grid';
+  cropBox.append(
+    ...positionEditor('crop', backdropCrop, refresh, 0, 1),
+    row('zoom', ...slider(ZOOM_MIN, ZOOM_MAX, 0.01, backdropCrop.zoom, (n) => {
+      backdropCrop.zoom = n;
+      refresh();
+    })),
+  );
 
   imageBox.replaceChildren(
     row(
@@ -501,8 +639,10 @@ function renderImageControls(): void {
     note,
     row('fit', selectOf(IMAGE_FITS, b.fit, (f) => {
       b.fit = f;
+      cropBox.hidden = f === 'grid';
       refresh();
     })),
+    cropBox,
     row('opacity', ...slider(0, 1, 0.01, b.opacity, (n) => {
       b.opacity = n;
       refresh();
@@ -557,7 +697,7 @@ function setView(next: ViewSettings): void {
 // ---- panel: presets and chain ----
 
 const chainRoot = document.createElement('div');
-panel.append(chainRoot);
+tabs.page('effects').append(chainRoot);
 const chainPanel = new ChainPanel(chainRoot, {
   pipeline,
   effects: listEffects(),
@@ -588,13 +728,50 @@ function baseName(name: string): string {
   return dot > 0 ? name.slice(0, dot) : name;
 }
 
-const exportBox = section('export');
+const exportBox = section('export', 'export');
 
 // Current frame as PNG: backdrop included, transparent where the backdrop is.
+/** How exports look at `width x height`: the current view settings, cell size fitted to the frame. */
+function exportLook(width: number, height: number): Omit<FrameLook, 'cols' | 'rows' | 'cellAspect' | 'polarity'> {
+  const theme = THEMES[settings.polarity];
+  return {
+    theme,
+    ink: parseHex(theme.fg),
+    backdrop: settings.backdrop,
+    backdropImage: resolveBackdropImage(),
+    picture: renderer.picture,
+    backdropCrop: { ...backdropCrop },
+    rampChars: BUILTIN_RAMP_CHARS[settings.ramp],
+    family: FONT_FAMILY,
+    weight: 400,
+    useSourceChars: settings.useSourceChars,
+    quantizeMode: settings.quantizeMode,
+    width,
+    height,
+    // A fixed canvas has the grid's aspect: fill it. `auto` letterboxes into the chosen size.
+    fill: canvasFrame() !== null,
+  };
+}
+
 const pngButton = button('save PNG', () => {
   if (source === null) return;
   const name = videoFileName(source.name, chainPanel.presetName, 'png');
-  canvas.toBlob((blob) => {
+  // A fixed canvas: the last frame drawn again at the canvas size, glyphs
+  // at that size (not scaled from the screen). `auto`: the view itself.
+  const frame = canvasFrame();
+  let out = canvas;
+  if (frame !== null && lastWork !== null) {
+    const painter = createFramePainter({
+      ...exportLook(frame.width, frame.height),
+      cols: lastWork.cols,
+      rows: lastWork.rows,
+      cellAspect: meta.cellAspect,
+      polarity: meta.polarity,
+    });
+    painter.paint(lastWork);
+    out = painter.canvas;
+  }
+  out.toBlob((blob) => {
     if (blob === null) {
       setStatus('PNG export failed');
       return;
@@ -605,7 +782,7 @@ const pngButton = button('save PNG', () => {
     link.download = name;
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 10_000);
-    setStatus(`saved ${name} · ${canvas.width}×${canvas.height}`);
+    setStatus(`saved ${name} · ${out.width}×${out.height}`);
   }, 'image/png');
 });
 pngButton.disabled = true;
@@ -654,6 +831,9 @@ exportBox.append(
 const VIDEO_FPS = ['60', '30'] as const;
 const VIDEO_QUALITY: readonly VideoQuality[] = ['high', 'medium', 'low'];
 const VIDEO_LENGTH = ['manual', '5 s', '10 s', '15 s', '30 s'] as const;
+const RENDER_LENGTH = ['take', '5 s', '10 s', '15 s', '30 s'] as const;
+/** Render length when there is no take to measure. */
+const RENDER_FALLBACK_SECONDS = 10;
 
 const formats = typeof MediaRecorder === 'undefined' ? [] : supportedFormats((m) => MediaRecorder.isTypeSupported(m));
 const video = {
@@ -664,6 +844,17 @@ const video = {
   fromStart: true,
 };
 const recorder = new CanvasRecorder();
+const captureCanvas = document.createElement('canvas');
+const captureCtx = captureCanvas.getContext('2d', { alpha: true });
+let capturing = false;
+
+/** Copies the view into the recording canvas at the canvas size. */
+function copyToCapture(): void {
+  if (captureCtx === null) return;
+  captureCtx.imageSmoothingQuality = 'high';
+  captureCtx.clearRect(0, 0, captureCanvas.width, captureCanvas.height);
+  captureCtx.drawImage(canvas, 0, 0, captureCanvas.width, captureCanvas.height);
+}
 // Pointer path of the latest take, for replaying it offline.
 const takeTrack = new PointerTrack();
 let takeStart = 0;
@@ -701,10 +892,21 @@ async function toggleRecording(): Promise<void> {
   if (video.fromStart) pipeline.restart();
   takeTrack.clear();
   takeStart = pipeline.ctx.time;
-  recorder.start(canvas, {
+  // A fixed canvas records at its exact size: the screen frame is copied
+  // (scaled) into an offscreen canvas each frame. `auto` records the view.
+  const frame = canvasFrame();
+  let target = canvas;
+  if (frame !== null) {
+    captureCanvas.width = frame.width;
+    captureCanvas.height = frame.height;
+    capturing = true;
+    copyToCapture();
+    target = captureCanvas;
+  }
+  recorder.start(target, {
     format,
     fps: video.fps,
-    bitsPerSecond: bitrateFor(canvas.width, canvas.height, video.fps, video.quality),
+    bitsPerSecond: bitrateFor(target.width, target.height, video.fps, video.quality),
   });
   stage.classList.add('recording');
   tickRecording();
@@ -712,8 +914,10 @@ async function toggleRecording(): Promise<void> {
 
 async function finishRecording(): Promise<void> {
   const format = formats[video.format];
+  capturing = false;
   stage.classList.remove('recording');
   recordButton.textContent = '● record';
+  refreshLengthHint();
   try {
     const blob = await recorder.stop();
     const name = videoFileName(source?.name ?? 'ascii', chainPanel.presetName, format?.ext ?? 'webm');
@@ -746,7 +950,7 @@ function tickRecording(): void {
 
 // Video section: shared settings, then live recording, then offline render,
 // each with its own format list (they use different encoders).
-const videoBox = section('video');
+const videoBox = section('video', 'export');
 
 function subhead(text: string): HTMLElement {
   const h = document.createElement('h4');
@@ -770,9 +974,6 @@ videoBox.append(
     video.quality = v;
     void refreshOfflineFormats();
   })),
-  row('length', selectOf(VIDEO_LENGTH, 'manual', (v) => {
-    video.seconds = v === 'manual' ? 0 : parseInt(v, 10);
-  })),
   subhead('record · live, with cursor'),
 );
 if (formats.length === 0) {
@@ -781,6 +982,9 @@ if (formats.length === 0) {
   videoBox.append(
     row('format', formatSelect),
     recordAlphaHint,
+    row('length', selectOf(VIDEO_LENGTH, 'manual', (v) => {
+      video.seconds = v === 'manual' ? 0 : parseInt(v, 10);
+    })),
     row('from start', checkbox(video.fromStart, (on) => {
       video.fromStart = on;
     })),
@@ -790,7 +994,7 @@ if (formats.length === 0) {
 
 // ---- export: video (offline, frame by frame) ----
 
-const offline = { size: 'screen' as FrameSizeName, replay: true, format: 0 };
+const offline = { size: 'screen' as FrameSizeName, replay: true, format: 0, length: 'take' as (typeof RENDER_LENGTH)[number] };
 
 // Offline format list, re-probed when size, fps or quality change: whether
 // H.264 encodes depends on all three. Unsupported entries stay visible.
@@ -802,6 +1006,9 @@ offlineFormatSelect.addEventListener('change', () => {
 let probeId = 0;
 
 function offlineSize(): [number, number] {
+  // A fixed canvas is the frame; `auto` picks from the list.
+  const frame = canvasFrame();
+  if (frame !== null) return [frame.width, frame.height];
   const size = FRAME_SIZES[offline.size];
   return size === null ? [canvas.width, canvas.height] : [size[0], size[1]];
 }
@@ -810,25 +1017,60 @@ async function refreshOfflineFormats(): Promise<void> {
   if (typeof VideoEncoder === 'undefined') return;
   const id = ++probeId;
   const [w, h] = offlineSize();
-  const ok = await probeOfflineFormats(w, h, bitrateFor(w, h, video.fps, video.quality));
+  const support = await probeOfflineFormats(w, h, bitrateFor(w, h, video.fps, video.quality), video.fps);
   if (id !== probeId) return; // a newer probe superseded this one
+  const why: string[] = [];
   OFFLINE_FORMATS.forEach((f, i) => {
     const option = offlineFormatSelect.options[i];
     if (option === undefined) return;
-    option.disabled = ok[i] !== true;
+    const s = support[i];
+    option.disabled = s !== 'ok';
     const lossy = settings.backdrop.kind === 'transparent' && !f.alpha;
     option.textContent =
-      ok[i] !== true ? `${f.label} — not supported here` : lossy ? `${f.label} — no transparency` : f.label;
+      s === 'none' ? `${f.label} — not in this browser`
+      : s === 'size' ? `${f.label} — too large here`
+      : lossy ? `${f.label} — no transparency`
+      : f.label;
+    if (s === 'none') why.push(`${f.label}: this browser has no encoder for it.`);
+    if (s === 'size') {
+      why.push(`${f.label}: cannot encode ${w}×${h} at ${video.fps} fps, ${video.quality} quality — try a smaller size, 30 fps or lower quality.`);
+    }
   });
+  formatHint.textContent = why.join(' ');
+  formatHint.hidden = why.length === 0;
   // Keep the choice if it still works, otherwise move to the first that does.
-  if (ok[offline.format] !== true) {
-    const first = ok.indexOf(true);
+  if (support[offline.format] !== 'ok') {
+    const first = support.indexOf('ok');
     if (first >= 0) {
       offline.format = first;
       offlineFormatSelect.value = String(first);
     }
   }
 }
+const formatHint = hint('');
+formatHint.hidden = true;
+
+/** Render length in seconds and where it comes from. */
+function renderSeconds(): { seconds: number; replay: boolean } {
+  const replay = offline.replay && takeTrack.length > 1;
+  if (offline.length !== 'take') return { seconds: parseInt(offline.length, 10), replay };
+  return { seconds: takeTrack.length > 1 ? takeTrack.duration : RENDER_FALLBACK_SECONDS, replay };
+}
+
+const lengthHint = hint('');
+/** Shows what `take` means right now. */
+function refreshLengthHint(): void {
+  const take = takeTrack.length > 1 ? `last take: ${takeTrack.duration.toFixed(1)} s` : 'no take recorded yet';
+  const { seconds } = renderSeconds();
+  lengthHint.textContent = `${take} · render: ${seconds.toFixed(1)} s`;
+}
+
+// Size list only for an `auto` canvas; a fixed canvas is the frame.
+const offlineSizeRow = row('size', selectOf(Object.keys(FRAME_SIZES) as FrameSizeName[], offline.size, (v) => {
+  offline.size = v;
+  void refreshOfflineFormats();
+}));
+
 let rendering: AbortController | null = null;
 
 const renderButton = button('render', () => void toggleRender(), 'exact fps, any size; replays the last take');
@@ -847,31 +1089,19 @@ async function toggleRender(): Promise<void> {
   const [width, height] = offlineSize();
   const format = OFFLINE_FORMATS[offline.format];
   if (format === undefined) return;
-  const replay = offline.replay && takeTrack.length > 1;
-  const seconds = replay ? takeTrack.duration : video.seconds > 0 ? video.seconds : 10;
-  const theme = THEMES[settings.polarity];
+  const { seconds, replay } = renderSeconds();
 
   rendering = new AbortController();
   renderButton.textContent = 'cancel · 0%';
   try {
     const { blob, ext } = await renderOffline(
       {
+        ...exportLook(width, height),
         source: field,
         meta,
         chain: chainToPreset(pipeline.chain),
         lookup: getEffect,
         color: structuredClone(settings.color),
-        theme,
-        ink: parseHex(theme.fg),
-        backdrop: settings.backdrop,
-        backdropImage: resolveBackdropImage(),
-        rampChars: BUILTIN_RAMP_CHARS[settings.ramp],
-        family: FONT_FAMILY,
-        weight: 400,
-        useSourceChars: settings.useSourceChars,
-        quantizeMode: settings.quantizeMode,
-        width,
-        height,
         fps: video.fps,
         seconds,
         bitsPerSecond: bitrateFor(width, height, video.fps, video.quality),
@@ -909,13 +1139,17 @@ if (typeof VideoEncoder === 'undefined') {
 } else {
   videoBox.append(
     row('format', offlineFormatSelect),
-    row('size', selectOf(Object.keys(FRAME_SIZES) as FrameSizeName[], offline.size, (v) => {
-      offline.size = v;
-      void refreshOfflineFormats();
+    formatHint,
+    offlineSizeRow,
+    row('length', selectOf(RENDER_LENGTH, offline.length, (v) => {
+      offline.length = v;
+      refreshLengthHint();
     })),
     row('replay take', replayToggle),
+    lengthHint,
     row('render', renderButton),
   );
+  refreshLengthHint();
   void refreshOfflineFormats();
 }
 

@@ -1,5 +1,6 @@
 import { clamp01 } from './math.ts';
 import { createField, type Field } from './field.ts';
+import { placeRect, type PlacedRect, type Placement } from './placement.ts';
 
 export interface Levels {
   brightness: number;
@@ -13,6 +14,10 @@ export interface ImageImportOptions extends Partial<Levels> {
   cellAspect: number;
   color?: boolean;
   bgThreshold?: number;
+  /** Grid height; by default from the picture's aspect. */
+  rows?: number;
+  /** How the picture sits in the grid; by default stretched over it. */
+  place?: Placement;
 }
 
 export const DEFAULT_LEVELS: Levels = {
@@ -91,30 +96,56 @@ export function detectBackground(
   }
 }
 
-/** Area-averaged downscale of RGBA pixels into a cols x rows grid. */
+/**
+ * Picture rectangle as fractions of the grid (0..1 = the grid, may overflow),
+ * placed isotropically: a grid cell is `cellAspect` times as wide as tall.
+ */
+export function placeInGrid(
+  imgW: number,
+  imgH: number,
+  cols: number,
+  rows: number,
+  cellAspect: number,
+  place: Placement,
+): PlacedRect {
+  const boxW = cols * cellAspect;
+  const r = placeRect(imgW, imgH, boxW, rows, place);
+  return { x: r.x / boxW, y: r.y / rows, w: r.w / boxW, h: r.h / rows };
+}
+
+/**
+ * Area-averaged downscale of RGBA pixels into a cols x rows grid; the picture
+ * covers `rect` (fractions of the grid). Cells it covers partly get partial
+ * alpha, cells outside it are empty.
+ */
 function downscale(
   src: Uint8ClampedArray,
   srcW: number,
   srcH: number,
   cols: number,
   rows: number,
+  rect: PlacedRect,
   outRgb: Float32Array,
   outAlpha: Float32Array,
 ): void {
-  const scaleX = srcW / cols;
-  const scaleY = srcH / rows;
+  // Picture pixels per cell, and the grid origin in picture pixels.
+  const scaleX = srcW / (rect.w * cols);
+  const scaleY = srcH / (rect.h * rows);
+  const originX = -rect.x * cols * scaleX;
+  const originY = -rect.y * rows * scaleY;
+  const cellArea = scaleX * scaleY;
 
   for (let cy = 0; cy < rows; cy++) {
-    const sourceTop = cy * scaleY;
-    const sourceBottom = (cy + 1) * scaleY;
-    const yStart = Math.floor(sourceTop);
-    const yEnd = Math.ceil(sourceBottom);
+    const sourceTop = originY + cy * scaleY;
+    const sourceBottom = sourceTop + scaleY;
+    const yStart = Math.max(0, Math.floor(sourceTop));
+    const yEnd = Math.min(srcH, Math.ceil(sourceBottom));
 
     for (let cx = 0; cx < cols; cx++) {
-      const sourceLeft = cx * scaleX;
-      const sourceRight = (cx + 1) * scaleX;
-      const xStart = Math.floor(sourceLeft);
-      const xEnd = Math.ceil(sourceRight);
+      const sourceLeft = originX + cx * scaleX;
+      const sourceRight = sourceLeft + scaleX;
+      const xStart = Math.max(0, Math.floor(sourceLeft));
+      const xEnd = Math.min(srcW, Math.ceil(sourceRight));
 
       let r = 0;
       let g = 0;
@@ -124,11 +155,11 @@ function downscale(
 
       for (let y = yStart; y < yEnd; y++) {
         const overlapY = Math.min(y + 1, sourceBottom) - Math.max(y, sourceTop);
-        if (overlapY <= 0 || y < 0 || y >= srcH) continue;
+        if (overlapY <= 0) continue;
 
         for (let x = xStart; x < xEnd; x++) {
           const overlapX = Math.min(x + 1, sourceRight) - Math.max(x, sourceLeft);
-          if (overlapX <= 0 || x < 0 || x >= srcW) continue;
+          if (overlapX <= 0) continue;
 
           const weight = overlapX * overlapY;
           const p = (y * srcW + x) * 4;
@@ -141,10 +172,12 @@ function downscale(
       }
 
       const i = cy * cols + cx;
-      outRgb[i * 3] = r / totalWeight;
-      outRgb[i * 3 + 1] = g / totalWeight;
-      outRgb[i * 3 + 2] = b / totalWeight;
-      outAlpha[i] = a / totalWeight / 255;
+      // Colour of the covered part; alpha also counts the uncovered part as empty.
+      const k = totalWeight > 0 ? 1 / totalWeight : 0;
+      outRgb[i * 3] = r * k;
+      outRgb[i * 3 + 1] = g * k;
+      outRgb[i * 3 + 2] = b * k;
+      outAlpha[i] = Math.min(1, a / cellArea / 255);
     }
   }
 }
@@ -154,17 +187,41 @@ export function luma(r: number, g: number, b: number): number {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
-export function importImage(bitmap: ImageBitmap, opts: ImageImportOptions): Field {
-  const cols = Math.max(1, Math.round(opts.cols));
-  const rows = computeRows(bitmap.width, bitmap.height, cols, opts.cellAspect);
+/** RGBA pixels of a picture, possibly scaled down. */
+export interface Pixels {
+  readonly data: Uint8ClampedArray;
+  readonly width: number;
+  readonly height: number;
+}
 
+/**
+ * Reads a bitmap's pixels, scaled down so the longer side is at most
+ * `maxSide`: re-importing on every crop or `cols` change stays cheap.
+ */
+export function readPixels(bitmap: ImageBitmap, maxSide = Infinity): Pixels {
+  const s = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+  const width = Math.max(1, Math.round(bitmap.width * s));
+  const height = Math.max(1, Math.round(bitmap.height * s));
   const canvas = document.createElement('canvas');
-  canvas.width = bitmap.width;
-  canvas.height = bitmap.height;
+  canvas.width = width;
+  canvas.height = height;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  if (!ctx) throw new Error('importImage: no 2d context');
-  ctx.drawImage(bitmap, 0, 0);
-  const pixels = ctx.getImageData(0, 0, bitmap.width, bitmap.height).data;
+  if (!ctx) throw new Error('readPixels: no 2d context');
+  ctx.drawImage(bitmap, 0, 0, width, height);
+  return { data: ctx.getImageData(0, 0, width, height).data, width, height };
+}
+
+export function importImage(bitmap: ImageBitmap, opts: ImageImportOptions): Field {
+  return importPixels(readPixels(bitmap), opts);
+}
+
+export function importPixels(image: Pixels, opts: ImageImportOptions): Field {
+  const cols = Math.max(1, Math.round(opts.cols));
+  const rows = Math.max(1, Math.round(opts.rows ?? computeRows(image.width, image.height, cols, opts.cellAspect)));
+  const rect = opts.place === undefined
+    ? { x: 0, y: 0, w: 1, h: 1 }
+    : placeInGrid(image.width, image.height, cols, rows, opts.cellAspect, opts.place);
+  const pixels = image.data;
 
   const wantColor = opts.color === true;
   const field = createField(cols, rows, { color: wantColor, grad: true });
@@ -174,7 +231,7 @@ export function importImage(bitmap: ImageBitmap, opts: ImageImportOptions): Fiel
   }
 
   const rgb = new Float32Array(cols * rows * 3);
-  downscale(pixels, bitmap.width, bitmap.height, cols, rows, rgb, field.alpha);
+  downscale(pixels, image.width, image.height, cols, rows, rect, rgb, field.alpha);
 
   const levels: Levels = {
     brightness: opts.brightness ?? DEFAULT_LEVELS.brightness,

@@ -17,6 +17,7 @@ Turn a picture into living ASCII art in the browser: ripples that follow the cur
 
   Add any of them (even twice), reorder, mix, mask.
 - **Everything moves.** Any numeric parameter can be a constant, an LFO (sine, triangle, saw, square, noise) or a looping envelope. Effects have strength (`mix`) and masks (radial, rectangle, brightness, alpha). Effect centres sit on a 3×3 grid or anywhere (even off the edge), follow the cursor, or move by themselves: orbit, Lissajous, wander, sweep, bounce, keyframes — and hand over smoothly to the cursor when it arrives.
+- **Canvas.** Pick a pixel frame — 1080×1080, 1080×1350, 1080×1920, 1920×1080 or your own — and crop both the source and the backdrop into it (fit, position, zoom). Screen, recording, render and PNG all use it.
 - **Colour and layers.** Glyph colour: mono, the photo's own colours, or a gradient by brightness. Cell background plates. Backdrop: theme colour, any colour (chroma key), transparent, or an image — including the source photo itself, so effects can dissolve the ASCII into the picture.
 - **Presets.** Thirteen built-in looks, save and load your own as JSON, or press *random* to explore.
 - **Export.**

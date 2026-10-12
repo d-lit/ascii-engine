@@ -54,6 +54,16 @@ export class PointerTrack {
       out.vy = 0;
       return;
     }
+    // Past the end of the take (by more than a frame) the cursor has left.
+    if (time - this.duration > time - prevTime) {
+      this.positionAt(time, this.n - 1, out);
+      out.inside = false;
+      out.down = false;
+      out.clicked = false;
+      out.vx = 0;
+      out.vy = 0;
+      return;
+    }
     const i = this.indexAt(time);
     const flags = this.flags[Math.max(i, 0)]!;
     this.positionAt(time, i, out);

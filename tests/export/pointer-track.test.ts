@@ -31,6 +31,17 @@ describe('PointerTrack', () => {
     expect([out.x, out.y, out.vx]).toEqual([5, 6, 0]);
   });
 
+  it('leaves the picture after the take ends, but not on its last frame', () => {
+    const track = new PointerTrack();
+    track.push(0, ptr(0, 0));
+    track.push(2, ptr(5, 6, { down: true }));
+    const out = createPointer();
+    track.apply(2.01, 1.99, out);
+    expect(out.inside).toBe(true);
+    track.apply(2.5, 2.48, out);
+    expect([out.x, out.y, out.inside, out.down]).toEqual([5, 6, false, false]);
+  });
+
   it('fires a click once, in the frame window that contains it', () => {
     const track = new PointerTrack();
     track.push(0, ptr(0, 0));

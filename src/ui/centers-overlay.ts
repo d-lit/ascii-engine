@@ -29,8 +29,8 @@ export class CentersOverlay {
     this.canvas.hidden = !v;
   }
 
-  /** `cellW`/`cellH` in CSS pixels. */
-  draw(pipeline: Pipeline, cellW: number, cellH: number): void {
+  /** `cellW`/`cellH` and the grid offset `x0`/`y0` in CSS pixels. */
+  draw(pipeline: Pipeline, cellW: number, cellH: number, x0 = 0, y0 = 0): void {
     if (this.canvas.hidden) return;
     const v = this.view.getBoundingClientRect();
     const s = this.stage.getBoundingClientRect();
@@ -54,8 +54,8 @@ export class CentersOverlay {
     ctx.font = '10px ui-monospace, monospace';
     ctx.lineWidth = 1.5;
     pipeline.forEachCenter((x, y, label, mask) => {
-      const px = (x + 0.5) * cellW;
-      const py = (y + 0.5) * cellH;
+      const px = x0 + (x + 0.5) * cellW;
+      const py = y0 + (y + 0.5) * cellH;
       ctx.strokeStyle = ctx.fillStyle = mask ? MASK_COLOR : COLOR;
       ctx.beginPath();
       if (mask) ctx.arc(px, py, ARM, 0, Math.PI * 2);
