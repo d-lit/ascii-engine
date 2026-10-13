@@ -3,24 +3,37 @@
   "name": "Pointer lens",
   "ramp": "classic",
   "polarity": "dark-on-light",
-  "color": { "mode": "mono" },
+  "color": {
+    "mode": "mono"
+  },
   "chain": [
-    {
-      "effect": "swirl",
-      "params": { "center": "center", "angle": 120, "radius": 45, "wobble": 0.12 }
-    },
     {
       "effect": "lens",
       "params": {
         "center": "pointer",
-        "radius": 20,
-        "strength": { "lfo": "triangle", "freq": 0.25, "min": 0.2, "max": 0.6 }
+        "radius": 24,
+        "strength": {
+          "lfo": "triangle",
+          "freq": 0.25,
+          "min": 0.35,
+          "max": 0.8
+        }
       }
     },
     {
       "effect": "pulse",
-      "params": { "shape": "radial", "center": "pointer", "amount": 0.3, "radius": 18 },
-      "mask": { "type": "radial", "center": "pointer", "radius": 22, "soft": 6 }
+      "params": {
+        "shape": "radial",
+        "center": "pointer",
+        "amount": 0.3,
+        "radius": 18
+      },
+      "mask": {
+        "type": "radial",
+        "center": "pointer",
+        "radius": 22,
+        "soft": 6
+      }
     }
   ]
 }

@@ -50,8 +50,6 @@ export interface EnvValue {
   env: Array<[t: number, v: number]>;
   loop?: boolean;
   ease?: 'linear' | 'smooth';
-  /** `beat`: the envelope starts over on every beat of the track (SPEC 7.2). */
-  on?: 'beat';
 }
 
 /** A modulated number: any object form resolved by a registered ModSource. */
@@ -62,13 +60,35 @@ export interface AudioValue {
   max: number;
   /** Multiplier before clamping to 0..1. */
   gain?: number;
+  /** Levels below this count as silence; the rest stretches to 0..1 (DECISIONS 028). */
+  floor?: number;
   /** Averaging window, seconds. */
   attack?: number;
   /** Fall time of peaks, seconds. */
   release?: number;
 }
 
-export type ModValue = LfoValue | EnvValue | AudioValue;
+/**
+ * Step on audio (SPEC 7.3, DECISIONS 028): holds a value and jumps to the
+ * next one each time `step` rises through `threshold` — sample & hold.
+ */
+export interface StepValue {
+  step: AudioBand;
+  threshold: number;
+  mode: 'random' | 'cycle' | 'add';
+  min: number;
+  max: number;
+  /** `cycle`: the values in turn. */
+  values?: number[];
+  /** `add`: increment per step, wrapping within min..max. */
+  by?: number;
+  /** Seconds to slide from the last value to the new one; 0 = jump. */
+  glide?: number;
+  /** `random`: another sequence of values. */
+  seed?: number;
+}
+
+export type ModValue = LfoValue | EnvValue | AudioValue | StepValue;
 
 export type ParamValue = number | ModValue;
 
@@ -135,18 +155,23 @@ export function resolvePoint(value: PointValue, frame: ParamFrame, t: number, ou
   }
 }
 
+/** A step value for a point (positions) rather than a number: it has no `min`. */
+function isPointStep(v: object): boolean {
+  return 'step' in v && !('min' in v);
+}
+
 /** The input as a number or modulation value, or null if it is a point or something else. */
 export function asParamValue(v: ParamInput | undefined): ParamValue | null {
   if (typeof v === 'number') return v;
   if (typeof v !== 'object' || v === null) return null;
-  if ('x' in v || 'axes' in v || 'path' in v || 'follow' in v) return null;
-  return v;
+  if ('x' in v || 'axes' in v || 'path' in v || 'follow' in v || isPointStep(v)) return null;
+  return v as ParamValue;
 }
 
 function isPointValue(v: ParamInput | undefined): v is PointValue {
   if (v === 'pointer' || v === 'center') return true;
   if (typeof v !== 'object' || v === null) return false;
-  return ('x' in v && 'y' in v) || 'axes' in v || 'path' in v || 'follow' in v;
+  return ('x' in v && 'y' in v) || 'axes' in v || 'path' in v || 'follow' in v || isPointStep(v);
 }
 
 /** Fresh bag with defaults; point params get their own reusable Vec2. */

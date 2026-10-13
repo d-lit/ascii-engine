@@ -70,3 +70,18 @@ describe('sand', () => {
     expect(key(wa)).toEqual(key(wb));
   });
 });
+
+describe('sand: center crumble', () => {
+  it('crumbles only inside the circle around the centre', () => {
+    const { p } = setup({ crumble: 0, clickRadius: 0, centerRate: 5, centerRadius: 3, center: { x: 0.5, y: 0.25 }, hold: 30 });
+    const w = run(p, 0.5);
+    expect(w.sprites.count).toBeGreaterThan(5);
+    // Homes of the grains: all within the circle (centre ~ (9.5, 2.75), radius 3 iso).
+    for (let s = 0; s < w.sprites.count; s++) {
+      const g = w.sprites.src[s]!;
+      const dx = (g % COLS) - 9.5;
+      const dy = (Math.floor(g / COLS) - 2.75) / 0.5;
+      expect(Math.hypot(dx, dy)).toBeLessThanOrEqual(3.01);
+    }
+  });
+});

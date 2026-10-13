@@ -147,28 +147,58 @@ describe('particles, chunk 2', () => {
   });
 });
 
-describe('particles on beats', () => {
-  it('blasts around its centre on every beat of the track', async () => {
+describe('particles: center push', () => {
+  it('pushes out of a circle around the centre; following the bass it blasts on every kick', async () => {
     const { analyseBands } = await import('../../src/audio/bands.ts');
     const RATE = 22050;
+    // Short bass bursts at 0, 1 and 2 s with silence between.
     const s = new Float32Array(RATE * 3);
     for (let i = 0; i < s.length; i++) {
       const t = i / RATE;
-      s[i] = 0.6 * Math.exp(-(t % 1) / 0.08) * Math.sin(2 * Math.PI * 70 * t);
+      s[i] = t % 1 < 0.15 ? 0.6 * Math.sin(2 * Math.PI * 70 * t) : 0;
     }
     const f = createField(40, 20);
     f.lum.fill(1);
     f.alpha.fill(1);
     const p = new Pipeline(f, { cellAspect: 0.5, polarity: 'light-on-dark' }, createPointer());
-    p.add(particles, { beat: 80, radius: 10, explode: 0, stiffness: 40, damping: 14 });
+    p.add(particles, {
+      centerPush: { audio: 'bass', min: 0, max: 2000, release: 0.05 } as unknown as number,
+      centerRadius: 8,
+      explode: 0,
+      stiffness: 40,
+      damping: 14,
+    });
     p.setAudio({ bands: analyseBands(s, RATE), timing: { duration: 3, offset: 0, loop: false } });
+    // Mean distance of the moved cells from home, cell widths.
+    const spread = (w: ReturnType<typeof p.frame>): number => {
+      let sum = 0;
+      for (let k = 0; k < w.sprites.count; k++) {
+        const g = w.sprites.src[k]!;
+        sum += Math.hypot(w.sprites.x[k]! - (g % 40), (w.sprites.y[k]! - Math.floor(g / 40)) / 0.5);
+      }
+      return w.sprites.count > 0 ? sum / w.sprites.count : 0;
+    };
     let w = p.frame(0);
-    for (let i = 0; i < 5; i++) w = p.frame(1 / 60);
-    expect(w.sprites.count).toBeGreaterThan(50); // the beat at 0 s
-    for (let i = 0; i < 50; i++) w = p.frame(1 / 60); // ~0.9 s: settling, next beat not yet
-    const settling = w.sprites.count;
-    for (let i = 0; i < 10; i++) w = p.frame(1 / 60); // past the beat at 1 s
-    expect(w.sprites.count).toBeGreaterThan(settling);
+    for (let i = 0; i < 8; i++) w = p.frame(1 / 60);
+    const kick = spread(w); // the kick at 0 s
+    for (let i = 0; i < 46; i++) w = p.frame(1 / 60); // ~0.9 s: the bass has faded
+    const quiet = spread(w);
+    for (let i = 0; i < 9; i++) w = p.frame(1 / 60); // the kick at 1 s
+    expect(kick).toBeGreaterThan(quiet * 2);
+    expect(spread(w)).toBeGreaterThan(quiet * 2);
+  });
+
+  it('a constant push keeps a hole open around the centre', () => {
+    const f = createField(40, 20);
+    f.lum.fill(1);
+    f.alpha.fill(1);
+    const p = new Pipeline(f, { cellAspect: 0.5, polarity: 'light-on-dark' }, createPointer());
+    p.add(particles, { centerPush: 600, centerRadius: 6, center: { x: 0.5, y: 0.5 } as unknown as number });
+    let w = p.frame(0);
+    for (let i = 0; i < 120; i++) w = p.frame(1 / 60);
+    // Every cell near the centre is a sprite pushed off home.
+    const mid = Math.round(9.5) * 40 + Math.round(19.5);
+    expect(w.hidden[mid]).toBe(1);
   });
 });
 

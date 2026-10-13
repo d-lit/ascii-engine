@@ -3,20 +3,27 @@
   "name": "Prism",
   "ramp": "classic",
   "polarity": "light-on-dark",
-  "color": { "mode": "source" },
+  "color": {
+    "mode": "source"
+  },
   "chain": [
     {
       "effect": "swirl",
-      "params": { "center": "center", "angle": 90, "radius": 55, "wobble": 0.08 }
+      "params": {
+        "center": "center",
+        "angle": 140,
+        "radius": 55,
+        "wobble": 0.08
+      }
     },
     {
       "effect": "hue-cycle",
-      "params": { "speed": 0.08, "spread": 1.2, "direction": 35, "saturation": 0.55 }
-    },
-    {
-      "effect": "decode",
-      "params": { "speed": 60, "scramble": 0.7, "jitter": 0.5, "set": "hex" },
-      "mask": { "type": "alpha" }
+      "params": {
+        "speed": 0.08,
+        "spread": 1.2,
+        "direction": 35,
+        "saturation": 0.55
+      }
     }
   ]
 }

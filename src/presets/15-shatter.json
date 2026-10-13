@@ -3,12 +3,10 @@
   "name": "Shatter",
   "ramp": "classic",
   "polarity": "light-on-dark",
-  "color": { "mode": "source" },
+  "color": {
+    "mode": "source"
+  },
   "chain": [
-    {
-      "effect": "liquid",
-      "params": { "amplitude": 0.8, "scale": 30, "speed": 0.2 }
-    },
     {
       "effect": "particles",
       "params": {

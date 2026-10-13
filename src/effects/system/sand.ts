@@ -5,16 +5,19 @@ import { defineEffect } from '../types.ts';
 const MAX_STEPS = 8;
 const SEED_RELEASE = 0x5a1;
 const SEED_SIDE = 0x5a2;
+const SEED_LOCAL = 0x5a3;
 // Grain states.
 const HOME = 0;
 const SAND = 1;
 const BACK = 2;
 
 /**
- * Sand (SPEC 13, DECISIONS 026): characters crumble off the picture and fall
+ * Sand (SPEC 13, DECISIONS 026, 028): characters crumble off the picture and fall
  * as grains of a cellular automaton (down, else down-left or down-right),
  * piling up at the bottom edge over the picture; after `return, s` each
- * grain flies home. Only grains block grains, so a full photo crumbles too:
+ * grain flies home. Crumbling: a slow rate everywhere, a click, and a
+ * rate of its own in a circle around `center` — a plain number, so an
+ * `audio` bass on it crumbles a patch on every kick. Only grains block grains, so a full photo crumbles too:
  * a fallen grain leaves a hole showing the backdrop. Grains are sprites
  * carrying their cell's live glyph; between automaton steps they move
  * smoothly. Fixed steps and hashes: the same on screen, after a seek and in
@@ -27,8 +30,9 @@ export const sand = defineEffect({
   params: {
     crumble: { type: 'number', min: 0, max: 0.3, step: 0.005, default: 0.02, label: 'crumble, share/s', random: [0.01, 0.06] },
     clickRadius: { type: 'number', min: 0, max: 60, step: 1, default: 8, label: 'click radius, cells', random: [5, 15] },
-    beatRadius: { type: 'number', min: 0, max: 60, step: 1, default: 0, label: 'beat radius, cells', random: [0, 0] },
-    center: { type: 'point', default: 'center', label: 'center (beat)' },
+    centerRate: { type: 'number', min: 0, max: 20, step: 0.1, default: 0, label: 'center crumble, share/s', random: [0, 0] },
+    center: { type: 'point', default: 'center' },
+    centerRadius: { type: 'number', min: 1, max: 60, step: 1, default: 12, label: 'center radius, cells', random: [6, 20] },
     speed: { type: 'number', min: 5, max: 60, step: 1, default: 25, label: 'fall, cells/s', random: [15, 40] },
     hold: { type: 'number', min: 0.5, max: 30, step: 0.1, default: 4, label: 'return after, s', random: [2, 8] },
     flight: { type: 'number', min: 0.1, max: 3, step: 0.05, default: 0.7, label: 'flight home, s' },
@@ -96,7 +100,7 @@ export const sand = defineEffect({
       }
     };
 
-    const step = (interval: number, alpha: Float32Array, mask: Float32Array | null, mix: number): void => {
+    const step = (interval: number, aspect: number, alpha: Float32Array, mask: Float32Array | null, mix: number): void => {
       stepNo++;
       simTime += interval;
       const time = simTime;
@@ -116,6 +120,29 @@ export const sand = defineEffect({
         if (state[g] !== HOME || chance <= 0 || alpha[g]! < ALPHA_EPS) continue;
         const w = mask === null ? 1 : mask[g]!;
         if (w > 0 && hashInt2(g, stepNo, SEED_RELEASE) * HASH_UNIT < chance * w) release(g, time);
+      }
+      // Around the centre: a rate of its own, inside the circle.
+      const local = p.centerRate * interval * mix;
+      if (local > 0) {
+        const cx = p.center.x;
+        const cy = p.center.y;
+        const r = p.centerRadius;
+        const x0 = Math.max(0, Math.floor(cx - r));
+        const x1 = Math.min(cols - 1, Math.ceil(cx + r));
+        const y0 = Math.max(0, Math.floor(cy - r * aspect));
+        const y1 = Math.min(rows - 1, Math.ceil(cy + r * aspect));
+        for (let y = y0; y <= y1; y++) {
+          for (let x = x0; x <= x1; x++) {
+            const g = y * cols + x;
+            if (state[g] !== HOME || alpha[g]! < ALPHA_EPS) continue;
+            const w = mask === null ? 1 : mask[g]!;
+            if (w <= 0) continue;
+            const dx = x - cx;
+            const dy = (y - cy) / aspect;
+            if (dx * dx + dy * dy > r * r) continue;
+            if (hashInt2(g, stepNo, SEED_LOCAL) * HASH_UNIT < local * w) release(g, time);
+          }
+        }
       }
       // Fall: bottom-up so a column moves together; sweep direction alternates.
       for (let y = rows - 2; y >= 0; y--) {
@@ -152,14 +179,13 @@ export const sand = defineEffect({
 
           const ptr = ctx.pointer;
           if (ptr.clicked && ptr.inside && p.clickRadius > 0) releaseAround(ptr.x, ptr.y, p.clickRadius, aspect, alpha, mask, simTime);
-          if (ctx.beat > 0 && p.beatRadius > 0) releaseAround(p.center.x, p.center.y, p.beatRadius * ctx.beat, aspect, alpha, mask, simTime);
 
           const interval = 1 / p.speed;
           pending += ctx.dt;
           let steps = Math.floor(pending / interval);
           pending -= steps * interval;
           if (steps > MAX_STEPS) steps = MAX_STEPS;
-          for (let s = 0; s < steps; s++) step(interval, alpha, mask, mix);
+          for (let s = 0; s < steps; s++) step(interval, aspect, alpha, mask, mix);
           // Between steps grains glide from `prev` to `pos`.
           const glide = Math.min(1, pending / interval);
 

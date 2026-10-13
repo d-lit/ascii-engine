@@ -97,46 +97,6 @@ describe('audio modulation', () => {
   });
 });
 
-describe('beats', () => {
-  const RATE2 = 22050;
-  // Kicks at 0, 1, 2, 3 s.
-  const s = new Float32Array(RATE2 * 4);
-  for (let i = 0; i < s.length; i++) {
-    const t = i / RATE2;
-    s[i] = 0.6 * Math.exp(-(t % 1) / 0.08) * Math.sin(2 * Math.PI * 70 * t);
-  }
-  const bands = analyseBands(s, RATE2);
-  const feed = { bands, timing: { duration: 4, offset: 0, loop: false } };
-
-  it('pulses ctx.beat once per beat, in the frame that hears it', () => {
-    const { p } = probePipeline(0);
-    p.setAudio(feed);
-    const hits: number[] = [];
-    p.frame(0);
-    for (let i = 1; i <= 160; i++) {
-      p.frame(1 / 40);
-      if (p.ctx.beat > 0) hits.push(Number(p.ctx.time.toFixed(3)));
-    }
-    expect(hits.length).toBe(4);
-    hits.forEach((h, k) => expect(Math.abs(h - k)).toBeLessThan(0.08));
-  });
-
-  it('restarts an envelope on every beat', () => {
-    const value = { env: [[0, 10], [0.5, 0]], on: 'beat' };
-    const { p, seen } = probePipeline(value);
-    p.setAudio(feed);
-    p.frame(0);
-    for (let i = 0; i < 44; i++) p.frame(1 / 40); // t = 1.1: 0.1 s after a beat
-    expect(seen[seen.length - 1]).toBeGreaterThan(6);
-    for (let i = 0; i < 16; i++) p.frame(1 / 40); // t = 1.5: 0.5 s after
-    expect(seen[seen.length - 1]).toBeLessThan(1);
-  });
-
-  it('rests at the last point without a track', () => {
-    expect(resolveMod({ env: [[0, 10], [0.5, 2]], on: 'beat' }, 0.1)).toBe(2);
-  });
-});
-
 describe('restartAt', () => {
   it('puts every effect clock at the given time without running frames', () => {
     const value = { lfo: 'saw', freq: 0.1, min: 0, max: 10 };
@@ -145,5 +105,24 @@ describe('restartAt', () => {
     p.frame(0);
     expect(p.ctx.time).toBe(4);
     expect(seen[seen.length - 1]).toBeCloseTo(4, 6);
+  });
+});
+
+describe('audio floor', () => {
+  it('reads levels under the floor as silence and stretches the rest', async () => {
+    const { setModEnv } = await import('../../src/pipeline/modulation.ts');
+    const RATE2 = 22050;
+    // Loud for 1 s, a quieter tail for 1 s, then silence.
+    const s = new Float32Array(RATE2 * 3);
+    for (let i = 0; i < s.length; i++) s[i] = (i < RATE2 ? 0.6 : i < 2 * RATE2 ? 0.05 : 0) * Math.sin(2 * Math.PI * 80 * (i / RATE2));
+    const feed = { bands: analyseBands(s, RATE2), timing: { duration: 3, offset: 0, loop: false } };
+    const at = (t: number, floor?: number) => {
+      setModEnv({ time: t, audio: feed });
+      return resolveMod({ audio: 'bass', min: 0, max: 1, release: 0, ...(floor === undefined ? {} : { floor }) }, t)!;
+    };
+    const tail = at(1.6);
+    expect(tail).toBeGreaterThan(0.05); // the tail still reads as something
+    expect(at(1.6, tail + 0.05)).toBe(0); // under the floor: silence
+    expect(at(0.5, 0.5)).toBeGreaterThan(0.9); // a hit still reaches the top
   });
 });

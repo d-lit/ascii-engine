@@ -13,10 +13,12 @@ const REST_SPEED = 0.05;
 const INTRO_SEED = 0x1a7;
 
 /**
- * Every cell is a particle with a home (SPEC 13, DECISIONS 024): a spring
- * pulls it back, damping calms it. The pointer pushes particles aside, a
- * click blasts them apart around it, a beat of the track blasts them around
- * `center`; `intro` starts them scattered so the picture assembles itself.
+ * Every cell is a particle with a home (SPEC 13, DECISIONS 024, 028): a
+ * spring pulls it back, damping calms it. Two pushers drive particles out of
+ * a circle: the pointer, and `center` with its own force — a plain number,
+ * so an `audio` bass on it gives a blast on every kick, visible in the panel.
+ * A click blasts them apart around the pointer; `intro` starts them
+ * scattered so the picture assembles itself.
  * A moved particle leaves its cell empty and is drawn as a sprite carrying
  * the cell's live glyph and colour; at rest it is a plain cell again.
  * Positions are in cell widths on both axes (isotropic).
@@ -32,9 +34,10 @@ export const particles = defineEffect({
     push: { type: 'number', min: 0, max: 800, step: 5, default: 0, label: 'cursor push', random: [100, 400] },
     pushRadius: { type: 'number', min: 1, max: 60, step: 1, default: 8, label: 'push radius, cells', random: [5, 15] },
     explode: { type: 'number', min: 0, max: 200, step: 1, default: 60, label: 'click force, cells/s', random: [30, 120] },
-    beat: { type: 'number', min: 0, max: 200, step: 1, default: 0, label: 'beat force, cells/s', random: [0, 0] },
-    center: { type: 'point', default: 'center', label: 'center (beat)' },
-    radius: { type: 'number', min: 1, max: 200, step: 1, default: 30, label: 'blast radius, cells', random: [15, 60] },
+    radius: { type: 'number', min: 1, max: 200, step: 1, default: 30, label: 'click radius, cells', random: [15, 60] },
+    centerPush: { type: 'number', min: 0, max: 3000, step: 10, default: 0, label: 'center push', random: [0, 0] },
+    center: { type: 'point', default: 'center' },
+    centerRadius: { type: 'number', min: 1, max: 200, step: 1, default: 30, label: 'center radius, cells', random: [15, 60] },
     snap: { type: 'boolean', default: false, label: 'snap to cells' },
   },
   create(p) {
@@ -119,6 +122,24 @@ export const particles = defineEffect({
       }
     };
 
+    /** Wakes the resting particles within `r` of (cx, cy), iso units. */
+    const wake = (cx: number, cy: number, r: number, aspect: number, rows: number, alpha: Float32Array, mask: Float32Array | null): void => {
+      const x0 = Math.max(0, Math.floor(cx - r));
+      const x1 = Math.min(cols - 1, Math.ceil(cx + r));
+      const y0 = Math.max(0, Math.floor((cy - r) * aspect));
+      const y1 = Math.min(rows - 1, Math.ceil((cy + r) * aspect));
+      for (let y = y0; y <= y1; y++) {
+        for (let x = x0; x <= x1; x++) {
+          const i = y * cols + x;
+          if (moving[i] === 1 || alpha[i]! < ALPHA_EPS) continue;
+          if (mask !== null && mask[i]! <= 0) continue;
+          const dx = px[i]! - cx;
+          const dy = py[i]! - cy;
+          if (dx * dx + dy * dy < r * r) moving[i] = 1;
+        }
+      }
+    };
+
     return {
       kind: 'system',
       system: {
@@ -128,32 +149,24 @@ export const particles = defineEffect({
           const alpha = work.alpha;
           const rows = work.rows;
 
-          // Click: a blast at the pointer. Beat: a blast at `center`, as strong as the beat.
+          // Click: a blast at the pointer.
           const ptr = ctx.pointer;
           if (ptr.clicked && ptr.inside && p.explode > 0) blast(ptr.x, ptr.y / aspect, p.explode * mix, p.radius, alpha, mask);
-          if (ctx.beat > 0 && p.beat > 0) blast(p.center.x, p.center.y / aspect, p.beat * ctx.beat * mix, p.radius, alpha, mask);
 
-          // Pointer push: wake the resting cells under it; the steps push every moving one.
-          const pushing = ptr.inside && p.push > 0;
-          const pcx = ptr.x;
-          const pcy = ptr.y / aspect;
-          const pr = p.pushRadius;
-          if (pushing) {
-            const x0 = Math.max(0, Math.floor(pcx - pr));
-            const x1 = Math.min(cols - 1, Math.ceil(pcx + pr));
-            const y0 = Math.max(0, Math.floor((pcy - pr) * aspect));
-            const y1 = Math.min(rows - 1, Math.ceil((pcy + pr) * aspect));
-            for (let y = y0; y <= y1; y++) {
-              for (let x = x0; x <= x1; x++) {
-                const i = y * cols + x;
-                if (moving[i] === 1 || alpha[i]! < ALPHA_EPS) continue;
-                if (mask !== null && mask[i]! <= 0) continue;
-                const dx = px[i]! - pcx;
-                const dy = py[i]! - pcy;
-                if (dx * dx + dy * dy < pr * pr) moving[i] = 1;
-              }
-            }
-          }
+          // Two pushers, iso units: the pointer ((1 - d/r)^2, soft) and the
+          // centre (1 - d/r, punchier). Resting cells under them wake up.
+          const aOn = ptr.inside && p.push > 0;
+          const ax0 = ptr.x;
+          const ay0 = ptr.y / aspect;
+          const ar = p.pushRadius;
+          const aForce = p.push * mix;
+          const bOn = p.centerPush > 0;
+          const bx0 = p.center.x;
+          const by0 = p.center.y / aspect;
+          const br = p.centerRadius;
+          const bForce = p.centerPush * mix;
+          if (aOn) wake(ax0, ay0, ar, aspect, rows, alpha, mask);
+          if (bOn) wake(bx0, by0, br, aspect, rows, alpha, mask);
 
           // Fixed steps; the remainder carries to the next frame.
           pending += ctx.dt;
@@ -162,7 +175,8 @@ export const particles = defineEffect({
           if (steps > MAX_STEPS) steps = MAX_STEPS;
           const k = p.stiffness;
           const c = p.damping;
-          const push = p.push * mix;
+          // A push weaker than this cannot hold a particle off its rest spot.
+          const holdForce = k * REST_DIST;
           for (let s = 0; s < steps; s++) {
             for (let i = 0; i < n; i++) {
               if (moving[i] === 0) continue;
@@ -172,18 +186,33 @@ export const particles = defineEffect({
               }
               const hx = i % cols;
               const hy = Math.floor(i / cols) / aspect;
-              let ax = k * (hx - px[i]!) - c * vx[i]!;
-              let ay = k * (hy - py[i]!) - c * vy[i]!;
-              if (pushing) {
-                const dx = px[i]! - pcx;
-                const dy = py[i]! - pcy;
+              const x0 = px[i]!;
+              const y0 = py[i]!;
+              let ax = k * (hx - x0) - c * vx[i]!;
+              let ay = k * (hy - y0) - c * vy[i]!;
+              const w = mask === null ? 1 : mask[i]!;
+              let near = false;
+              if (aOn) {
+                const dx = x0 - ax0;
+                const dy = y0 - ay0;
                 const d2 = dx * dx + dy * dy;
-                if (d2 < pr * pr) {
+                if (d2 < ar * ar) {
                   const d = Math.sqrt(d2);
-                  const w = mask === null ? 1 : mask[i]!;
-                  // Strongest at the pointer, gone at the radius.
-                  const f = push * w * (1 - d / pr) * (1 - d / pr);
-                  // Right under the pointer: a direction from the index.
+                  const f = aForce * w * (1 - d / ar) * (1 - d / ar);
+                  if (f > holdForce) near = true;
+                  // Right under the pusher: a direction from the index.
+                  ax += d > 1e-4 ? (dx / d) * f : Math.cos(i * 2.399) * f;
+                  ay += d > 1e-4 ? (dy / d) * f : Math.sin(i * 2.399) * f;
+                }
+              }
+              if (bOn) {
+                const dx = x0 - bx0;
+                const dy = y0 - by0;
+                const d2 = dx * dx + dy * dy;
+                if (d2 < br * br) {
+                  const d = Math.sqrt(d2);
+                  const f = bForce * w * (1 - d / br);
+                  if (f > holdForce) near = true;
                   ax += d > 1e-4 ? (dx / d) * f : Math.cos(i * 2.399) * f;
                   ay += d > 1e-4 ? (dy / d) * f : Math.sin(i * 2.399) * f;
                 }
@@ -191,11 +220,11 @@ export const particles = defineEffect({
               // Semi-implicit Euler: velocity first, then position.
               let ux = vx[i]! + ax * STEP;
               let uy = vy[i]! + ay * STEP;
-              const x = px[i]! + ux * STEP;
-              const y = py[i]! + uy * STEP;
+              const x = x0 + ux * STEP;
+              const y = y0 + uy * STEP;
               const ex = hx - x;
               const ey = hy - y;
-              const near = pushing && (x - pcx) * (x - pcx) + (y - pcy) * (y - pcy) < pr * pr;
+              // Held off home by a pusher, a particle does not fall asleep.
               if (!near && ex * ex + ey * ey < REST_DIST * REST_DIST && ux * ux + uy * uy < REST_SPEED * REST_SPEED) {
                 px[i] = hx;
                 py[i] = hy;

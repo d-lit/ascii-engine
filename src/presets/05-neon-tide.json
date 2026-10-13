@@ -6,25 +6,45 @@
   "color": {
     "mode": "gradient",
     "stops": [
-      { "pos": 0, "color": "#14002e" },
-      { "pos": 0.33, "color": "#7a00ff" },
-      { "pos": 0.66, "color": "#ff2fb3" },
-      { "pos": 1, "color": "#2ff7ff" }
+      {
+        "pos": 0,
+        "color": "#14002e"
+      },
+      {
+        "pos": 0.33,
+        "color": "#7a00ff"
+      },
+      {
+        "pos": 0.66,
+        "color": "#ff2fb3"
+      },
+      {
+        "pos": 1,
+        "color": "#2ff7ff"
+      }
     ]
   },
   "chain": [
-    { "effect": "liquid", "params": { "amplitude": 1.4, "scale": 30, "speed": 0.2 } },
     {
-      "effect": "ripple",
-      "params": { "center": "pointer", "amplitude": 1.8, "wavelength": 16, "speed": 22, "decay": 30 }
+      "effect": "liquid",
+      "params": {
+        "amplitude": 1.4,
+        "scale": 30,
+        "speed": 0.2
+      }
     },
     {
       "effect": "wave",
       "params": {
-        "direction": { "lfo": "saw", "freq": 0.03, "min": 0, "max": 360 },
+        "direction": {
+          "lfo": "saw",
+          "freq": 0.03,
+          "min": 0,
+          "max": 360
+        },
         "wavelength": 45,
         "speed": 0.35,
-        "amplitude": 0.18
+        "amplitude": 0.28
       }
     }
   ]

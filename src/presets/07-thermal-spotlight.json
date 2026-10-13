@@ -6,27 +6,57 @@
   "color": {
     "mode": "gradient",
     "stops": [
-      { "pos": 0, "color": "#120400" },
-      { "pos": 0.35, "color": "#8a1c06" },
-      { "pos": 0.7, "color": "#f07f13" },
-      { "pos": 1, "color": "#fff3b0" }
+      {
+        "pos": 0,
+        "color": "#120400"
+      },
+      {
+        "pos": 0.35,
+        "color": "#8a1c06"
+      },
+      {
+        "pos": 0.7,
+        "color": "#f07f13"
+      },
+      {
+        "pos": 1,
+        "color": "#fff3b0"
+      }
     ]
   },
   "chain": [
     {
-      "effect": "pulse",
-      "params": { "shape": "radial", "center": "pointer", "frequency": 0.8, "amount": 0.3, "wavelength": 24, "radius": 30 }
-    },
-    {
       "effect": "erosion",
-      "params": { "threshold": 0.35, "softness": 0.1, "scale": 14, "speed": 0.3, "mode": "darken" },
+      "params": {
+        "threshold": 0.35,
+        "softness": 0.1,
+        "scale": 14,
+        "speed": 0.3,
+        "mode": "darken"
+      },
       "mix": 0.7,
-      "mask": { "type": "radial", "center": "pointer", "radius": 18, "soft": 8, "invert": true }
+      "mask": {
+        "type": "radial",
+        "center": "pointer",
+        "radius": 18,
+        "soft": 8,
+        "invert": true
+      }
     },
     {
       "effect": "tint",
-      "params": { "color": "#3a7bff", "blend": "multiply", "amount": 0.85 },
-      "mask": { "type": "radial", "center": "pointer", "radius": 18, "soft": 8, "invert": true }
+      "params": {
+        "color": "#3a7bff",
+        "blend": "multiply",
+        "amount": 0.85
+      },
+      "mask": {
+        "type": "radial",
+        "center": "pointer",
+        "radius": 18,
+        "soft": 8,
+        "invert": true
+      }
     }
   ]
 }

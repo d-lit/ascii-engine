@@ -1,6 +1,7 @@
 import type { GradientStop } from '../pipeline/colorize.ts';
 import type { MaskSpec } from '../pipeline/mask.ts';
 import type {
+  StepValue,
   AudioValue,
   EnvValue,
   LfoShape,
@@ -13,10 +14,12 @@ import type {
 import { asParamValue } from '../pipeline/params.ts';
 import { AUDIO_BANDS } from '../audio/bands.ts';
 import { AUDIO_ATTACK, AUDIO_RELEASE } from '../pipeline/modulation.ts';
+
+const STEP_MODES = ['random', 'cycle', 'add'] as const;
 import { pointControl } from './point-control.ts';
 
 const LFO_SHAPES: readonly LfoShape[] = ['sine', 'triangle', 'saw', 'square', 'noise'];
-const NUMBER_MODES = ['const', 'lfo', 'env', 'audio'] as const;
+const NUMBER_MODES = ['const', 'lfo', 'env', 'audio', 'step'] as const;
 type NumberMode = (typeof NUMBER_MODES)[number];
 
 // ---- building blocks ----
@@ -106,6 +109,7 @@ function modeOf(v: ParamInput | undefined): NumberMode {
     if ('lfo' in v) return 'lfo';
     if ('env' in v) return 'env';
     if ('audio' in v) return 'audio';
+    if ('step' in v) return 'step';
   }
   return 'const';
 }
@@ -196,6 +200,58 @@ export function numberControl(
           lfo.phase = n;
         })),
       );
+    } else if (mode === 'step') {
+      const st = value as StepValue;
+      const extra = document.createElement('div');
+      const renderExtra = (): void => {
+        extra.replaceChildren();
+        if (st.mode === 'cycle') {
+          st.values ??= [st.min, st.max];
+          const text = document.createElement('input');
+          text.type = 'text';
+          text.value = (st.values ?? []).join(', ');
+          text.title = 'values in turn, comma separated';
+          text.addEventListener('input', () => {
+            const parts = text.value.split(',').map((x) => x.trim()).filter((x) => x !== '');
+            const nums = parts.map(Number);
+            const ok = nums.length > 0 && nums.every((n) => Number.isFinite(n) && n >= spec.min && n <= spec.max);
+            text.classList.toggle('invalid', !ok);
+            if (ok) st.values = nums;
+          });
+          extra.append(row('values', text));
+        } else if (st.mode === 'add') {
+          extra.append(row('by', ...slider(-(spec.max - spec.min), spec.max - spec.min, step, st.by ?? 0, (n) => {
+            st.by = n;
+          })));
+        } else {
+          extra.append(row('seed', ...slider(0, 99, 1, st.seed ?? 0, (n) => {
+            st.seed = n;
+          })));
+        }
+      };
+      renderExtra();
+      body.append(
+        row('band', selectOf(AUDIO_BANDS, st.step, (b) => {
+          st.step = b;
+        })),
+        row('threshold', ...slider(0.05, 0.95, 0.01, st.threshold, (n) => {
+          st.threshold = n;
+        })),
+        row('mode', selectOf(STEP_MODES, st.mode, (m) => {
+          st.mode = m;
+          renderExtra();
+        })),
+        row('min', ...slider(spec.min, spec.max, step, st.min, (n) => {
+          st.min = n;
+        })),
+        row('max', ...slider(spec.min, spec.max, step, st.max, (n) => {
+          st.max = n;
+        })),
+        extra,
+        row('glide, s', ...slider(0, 2, 0.01, st.glide ?? 0, (n) => {
+          st.glide = n;
+        })),
+      );
     } else if (mode === 'audio') {
       const a = value as AudioValue;
       body.append(
@@ -207,6 +263,9 @@ export function numberControl(
         })),
         row('max', ...slider(spec.min, spec.max, step, a.max, (n) => {
           a.max = n;
+        })),
+        row('floor', ...slider(0, 0.9, 0.01, a.floor ?? 0, (n) => {
+          a.floor = n;
         })),
         row('gain', ...slider(0, 4, 0.05, a.gain ?? 1, (n) => {
           a.gain = n;
@@ -237,10 +296,6 @@ export function numberControl(
         row('ease', selectOf(['linear', 'smooth'] as const, env.ease ?? 'linear', (e) => {
           env.ease = e;
         })),
-        row('on beat', checkbox(env.on === 'beat', (b) => {
-          if (b) env.on = 'beat';
-          else delete env.on;
-        })),
       );
     }
     box.replaceChildren(head, body);
@@ -251,6 +306,7 @@ export function numberControl(
     const lo = lerp(spec.min, spec.max, 0.25);
     const hi = lerp(spec.min, spec.max, 0.75);
     if (mode === 'lfo') return { lfo: 'sine', freq: 0.25, min: lo, max: hi };
+    if (mode === 'step') return { step: 'bass', threshold: 0.6, mode: 'random', min: lo, max: hi, glide: 0.1 };
     // Quiet = the bottom of the range, loud = three quarters: clearly visible.
     if (mode === 'audio') return { audio: 'bass', min: spec.min, max: hi };
     return { env: [[0, lo], [2, hi], [4, lo]], loop: true, ease: 'smooth' };

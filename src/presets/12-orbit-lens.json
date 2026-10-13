@@ -6,33 +6,62 @@
   "color": {
     "mode": "gradient",
     "stops": [
-      { "pos": 0, "color": "#020b1f" },
-      { "pos": 0.5, "color": "#0b6e99" },
-      { "pos": 1, "color": "#b8f3ff" }
+      {
+        "pos": 0,
+        "color": "#020b1f"
+      },
+      {
+        "pos": 0.5,
+        "color": "#0b6e99"
+      },
+      {
+        "pos": 1,
+        "color": "#b8f3ff"
+      }
     ]
   },
   "chain": [
     {
-      "effect": "swirl",
-      "params": { "center": "center", "angle": 90, "radius": 60, "wobble": 0.1 }
-    },
-    {
       "effect": "lens",
       "params": {
-        "center": { "path": { "kind": "orbit", "center": { "x": 0.5, "y": 0.5 }, "radius": 0.25, "speed": 0.08 } },
-        "radius": 16,
-        "strength": 0.55
+        "center": {
+          "path": {
+            "kind": "orbit",
+            "center": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "radius": 0.25,
+            "speed": 0.08
+          }
+        },
+        "radius": 20,
+        "strength": 0.7
       }
     },
     {
-      "effect": "ripple",
+      "effect": "glow",
       "params": {
-        "center": { "path": { "kind": "orbit", "center": { "x": 0.5, "y": 0.5 }, "radius": 0.25, "speed": 0.08, "phase": 0.5 } },
-        "amplitude": 1.2,
-        "wavelength": 10,
-        "speed": 20,
-        "decay": 25
-      }
+        "center": {
+          "path": {
+            "kind": "orbit",
+            "center": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "radius": 0.25,
+            "speed": 0.08,
+            "phase": 0.5
+          }
+        },
+        "color": "#7fe7ff",
+        "radius": 18,
+        "strength": 0.8,
+        "falloff": 1.6
+      },
+      "enabled": true,
+      "mix": 1,
+      "mask": null
     }
   ]
 }

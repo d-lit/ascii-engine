@@ -1,6 +1,8 @@
 import type { Vec2 } from '../core/math.ts';
 import { smoothstep } from '../core/math.ts';
-import { lfoUnit, resolveMod } from './modulation.ts';
+import { AUDIO_BANDS, type AudioBand } from '../audio/bands.ts';
+import { HASH_UNIT, hashInt2 } from '../core/prng.ts';
+import { currentModEnv, glideAt, lfoUnit, resolveMod, stepState, type StepState } from './modulation.ts';
 import type { ParamValue } from './params.ts';
 
 /** Normalized coordinates: 0 and 1 are the centres of the edge cells. */
@@ -26,10 +28,31 @@ export type PathKind = PathSpec['kind'];
 export const PATH_KINDS: readonly PathKind[] = ['orbit', 'lissajous', 'wander', 'sweep', 'bounce', 'path'];
 
 /** Moving point values on top of 'center' | 'pointer' | {x, y}. */
+/**
+ * Step on audio for a point (SPEC 7.3, DECISIONS 028): a new position each
+ * time `step` rises through `threshold` — random in `area`, the next of the
+ * 3×3 grid, or the next of `points`.
+ */
+export interface PointStep {
+  step: AudioBand;
+  threshold: number;
+  mode: 'random' | 'grid' | 'list';
+  /** `random`: where the point may land, shares of the picture. */
+  area?: { x: number; y: number; w: number; h: number };
+  /** `list`: positions in turn. */
+  points?: Vec2[];
+  glide?: number;
+  seed?: number;
+}
+
+export const POINT_STEP_MODES = ['random', 'grid', 'list'] as const;
+export const DEFAULT_STEP_AREA = { x: 0.15, y: 0.15, w: 0.7, h: 0.7 };
+
 export type MotionValue =
   | { axes: { x: ParamValue; y: ParamValue } }
   | { path: PathSpec }
-  | { follow: 'pointer'; idle?: PathSpec | Vec2; ease?: number };
+  | { follow: 'pointer'; idle?: PathSpec | Vec2; ease?: number }
+  | PointStep;
 
 /** Pointer facts a point needs; FrameContext's Pointer satisfies it. */
 export interface PointerLike {
@@ -176,7 +199,54 @@ function axis(value: ParamValue, t: number): number {
  * keeps state (the pointer weight in `out.w`); a clock that went backwards
  * (restart) snaps the weight instead of easing.
  */
+// Grid order for `grid` steps: centre, corners, edge middles — far jumps first.
+const GRID_ORDER = [4, 0, 8, 2, 6, 1, 7, 3, 5] as const;
+const POINT_STEP_SEED = 0x9e17;
+const pointStep: StepState = { k: 0, since: -1 };
+
+/** Normalized position of step `k` into `out` (shares of the picture). */
+function stepPosition(v: PointStep, k: number, out: Vec2): void {
+  switch (v.mode) {
+    case 'random': {
+      const a = v.area ?? DEFAULT_STEP_AREA;
+      out.x = a.x + a.w * hashInt2(k, 2 * (v.seed ?? 0), POINT_STEP_SEED) * HASH_UNIT;
+      out.y = a.y + a.h * hashInt2(k, 2 * (v.seed ?? 0) + 1, POINT_STEP_SEED) * HASH_UNIT;
+      return;
+    }
+    case 'grid': {
+      const cell = GRID_ORDER[k % GRID_ORDER.length]!;
+      out.x = (cell % 3) / 2;
+      out.y = Math.floor(cell / 3) / 2;
+      return;
+    }
+    case 'list': {
+      const list = v.points ?? [];
+      const p = list.length === 0 ? null : list[k % list.length]!;
+      out.x = p === null ? 0.5 : p.x;
+      out.y = p === null ? 0.5 : p.y;
+      return;
+    }
+  }
+}
+
+const stepA: Vec2 = { x: 0, y: 0 };
+const stepB: Vec2 = { x: 0, y: 0 };
+
 export function resolveMotion(value: MotionValue, frame: PointFrame, t: number, out: PointState): void {
+  if ('step' in value) {
+    stepState(currentModEnv(), value.step, value.threshold, pointStep);
+    const k = pointStep.k;
+    stepPosition(value, k, stepB);
+    const g = k === 0 ? 1 : glideAt(pointStep.since, value.glide ?? 0);
+    if (g < 1) {
+      stepPosition(value, k - 1, stepA);
+      stepB.x = stepA.x + (stepB.x - stepA.x) * g;
+      stepB.y = stepA.y + (stepB.y - stepA.y) * g;
+    }
+    out.x = clampN(stepB.x) * (frame.cols - 1);
+    out.y = clampN(stepB.y) * (frame.rows - 1);
+    return;
+  }
   if ('axes' in value) {
     out.x = axis(value.axes.x, t) * (frame.cols - 1);
     out.y = axis(value.axes.y, t) * (frame.rows - 1);
@@ -273,6 +343,23 @@ export function isMotionValue(v: unknown, isParam: (p: unknown) => boolean): v i
   if (!isRecord(v)) return false;
   if ('axes' in v) return isRecord(v.axes) && isParam(v.axes.x) && isParam(v.axes.y);
   if ('path' in v) return isPathSpec(v.path);
+  if ('step' in v) {
+    const areaOk =
+      v.area === undefined ||
+      (isRecord(v.area) && finite(v.area.x) && finite(v.area.y) && finite(v.area.w) && finite(v.area.h));
+    const pointsOk = v.points === undefined || (Array.isArray(v.points) && v.points.every(isPos));
+    return (
+      typeof v.step === 'string' &&
+      (AUDIO_BANDS as readonly string[]).includes(v.step) &&
+      finite(v.threshold) &&
+      typeof v.mode === 'string' &&
+      (POINT_STEP_MODES as readonly string[]).includes(v.mode) &&
+      areaOk &&
+      pointsOk &&
+      optFinite(v.glide) &&
+      optFinite(v.seed)
+    );
+  }
   if ('follow' in v) {
     if (v.follow !== 'pointer') return false;
     const idleOk = v.idle === undefined || isPos(v.idle) || isPathSpec(v.idle);

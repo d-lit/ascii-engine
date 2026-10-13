@@ -1,11 +1,21 @@
 import type { Vec2 } from '../core/math.ts';
 import type { NumberSpec, ParamInput, PointValue } from '../pipeline/params.ts';
 import { asParamValue } from '../pipeline/params.ts';
-import { POINT_MAX, POINT_MIN, type MotionValue, type PathKind, type PathSpec } from '../pipeline/points.ts';
+import {
+  DEFAULT_STEP_AREA,
+  POINT_MAX,
+  POINT_MIN,
+  POINT_STEP_MODES,
+  type MotionValue,
+  type PathKind,
+  type PathSpec,
+  type PointStep,
+} from '../pipeline/points.ts';
+import { AUDIO_BANDS } from '../audio/bands.ts';
 import { checkbox, numberControl, row, selectOf, slider } from './controls.ts';
 
 const ANCHORS = [0, 0.5, 1] as const;
-const MODES = ['position', 'cursor', 'axes', 'orbit', 'lissajous', 'wander', 'sweep', 'bounce', 'path'] as const;
+const MODES = ['position', 'cursor', 'axes', 'audio step', 'orbit', 'lissajous', 'wander', 'sweep', 'bounce', 'path'] as const;
 type Mode = (typeof MODES)[number];
 const IDLE = ['stay', 'position', 'orbit', 'lissajous', 'wander', 'sweep', 'bounce', 'path'] as const;
 type Idle = (typeof IDLE)[number];
@@ -16,6 +26,7 @@ function modeOf(v: unknown): Mode {
   if (v === 'center' || typeof v !== 'object' || v === null) return 'position';
   if ('follow' in v) return 'cursor';
   if ('axes' in v) return 'axes';
+  if ('step' in v) return 'audio step';
   if ('path' in v) return (v as { path: PathSpec }).path.kind;
   return 'position';
 }
@@ -203,6 +214,7 @@ export function pointControl(caption: string, get: () => unknown, set: (p: Point
       if (m === 'position') set({ x: here.x, y: here.y });
       else if (m === 'cursor') set('pointer');
       else if (m === 'axes') set({ axes: { x: here.x, y: here.y } });
+      else if (m === 'audio step') set({ step: 'bass', threshold: 0.6, mode: 'random', area: { ...DEFAULT_STEP_AREA }, glide: 0.15 });
       else set({ path: defaultPath(m, here) });
       render();
     });
@@ -225,6 +237,8 @@ export function pointControl(caption: string, get: () => unknown, set: (p: Point
       body.append(axis('x'), axis('y'));
     } else if (mode === 'cursor') {
       body.append(...cursorEditor(value, set, render));
+    } else if (mode === 'audio step') {
+      body.append(...stepEditor(value as PointStep));
     } else {
       body.append(...pathEditor((value as { path: PathSpec }).path));
     }
@@ -233,6 +247,66 @@ export function pointControl(caption: string, get: () => unknown, set: (p: Point
 
   render();
   return box;
+}
+
+/** "x:y, x:y" <-> positions; null for malformed text or a position out of range. */
+export function parsePositions(text: string): Array<{ x: number; y: number }> | null {
+  const parts = text.split(',').map((p) => p.trim()).filter((p) => p !== '');
+  if (parts.length === 0) return null;
+  const out: Array<{ x: number; y: number }> = [];
+  for (const part of parts) {
+    const m = /^(-?\d*\.?\d+)\s*:\s*(-?\d*\.?\d+)$/.exec(part);
+    if (!m) return null;
+    const x = Number(m[1]);
+    const y = Number(m[2]);
+    if (x < POINT_MIN || x > POINT_MAX || y < POINT_MIN || y > POINT_MAX) return null;
+    out.push({ x, y });
+  }
+  return out;
+}
+
+/**
+ * Audio step (SPEC 7.3): the point jumps each time a band of the track
+ * rises through the threshold. Edited in place.
+ */
+function stepEditor(st: PointStep): HTMLElement[] {
+  const extra = document.createElement('div');
+  const renderExtra = (): void => {
+    extra.replaceChildren();
+    if (st.mode === 'random') {
+      const a = (st.area ??= { ...DEFAULT_STEP_AREA });
+      extra.append(
+        num('area x', 0, 1, 0.01, a.x, (n) => (a.x = n)),
+        num('area y', 0, 1, 0.01, a.y, (n) => (a.y = n)),
+        num('area width', 0, 1, 0.01, a.w, (n) => (a.w = n)),
+        num('area height', 0, 1, 0.01, a.h, (n) => (a.h = n)),
+        num('seed', 0, 99, 1, st.seed ?? 0, (n) => (st.seed = n)),
+      );
+    } else if (st.mode === 'list') {
+      st.points ??= [{ x: 0.25, y: 0.5 }, { x: 0.75, y: 0.5 }];
+      const text = document.createElement('input');
+      text.type = 'text';
+      text.value = st.points.map((p) => `${p.x}:${p.y}`).join(', ');
+      text.title = 'x:y, comma separated; x, y from -0.5 to 1.5';
+      text.addEventListener('input', () => {
+        const parsed = parsePositions(text.value);
+        text.classList.toggle('invalid', parsed === null);
+        if (parsed !== null) st.points = parsed;
+      });
+      extra.append(row('points', text));
+    }
+  };
+  renderExtra();
+  return [
+    row('band', selectOf(AUDIO_BANDS, st.step, (b) => (st.step = b))),
+    num('threshold', 0.05, 0.95, 0.01, st.threshold, (n) => (st.threshold = n)),
+    row('jump to', selectOf(POINT_STEP_MODES, st.mode, (m) => {
+      st.mode = m;
+      renderExtra();
+    })),
+    extra,
+    num('glide, s', 0, 2, 0.01, st.glide ?? 0, (n) => (st.glide = n)),
+  ];
 }
 
 /** Cursor mode: what the point does while the cursor is away, and how fast it hands over. */

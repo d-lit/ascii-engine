@@ -6,50 +6,60 @@
   "color": {
     "mode": "gradient",
     "stops": [
-      { "pos": 0, "color": "#0a0018" },
-      { "pos": 0.4, "color": "#3a0ca3" },
-      { "pos": 0.75, "color": "#f72585" },
-      { "pos": 1, "color": "#ffe66d" }
+      {
+        "pos": 0,
+        "color": "#0a0018"
+      },
+      {
+        "pos": 0.4,
+        "color": "#3a0ca3"
+      },
+      {
+        "pos": 0.75,
+        "color": "#f72585"
+      },
+      {
+        "pos": 1,
+        "color": "#ffe66d"
+      }
     ]
   },
   "chain": [
     {
-      "effect": "liquid",
-      "params": {
-        "amplitude": { "audio": "level", "min": 0.6, "max": 2.5, "release": 0.5 }
-      }
-    },
-    {
       "effect": "ripple",
       "params": {
-        "mode": "beat",
-        "center": "center",
-        "amplitude": 3,
-        "wavelength": 16,
+        "mode": "continuous",
+        "center": {
+          "step": "bass",
+          "threshold": 0.7,
+          "mode": "grid",
+          "glide": 0.12
+        },
+        "amplitude": {
+          "audio": "bass",
+          "min": 0,
+          "max": 3.5,
+          "floor": 0.45,
+          "release": 0.15
+        },
+        "wavelength": 18,
         "speed": 40,
-        "decay": 70,
-        "life": 2
+        "decay": 80
       }
     },
     {
       "effect": "pulse",
       "params": {
-        "shape": "radial",
-        "center": "center",
-        "frequency": 0.4,
-        "amount": { "audio": "bass", "min": 0.08, "max": 0.45, "release": 0.25 },
-        "wavelength": 26,
-        "radius": 45
-      }
-    },
-    {
-      "effect": "glow",
-      "params": {
-        "center": "center",
-        "color": "#ffe66d",
-        "radius": 24,
-        "strength": { "env": [[0, 0.9], [0.35, 0.15]], "ease": "smooth", "on": "beat" },
-        "falloff": 1.6
+        "shape": "global",
+        "target": "contrast",
+        "frequency": 0,
+        "amount": {
+          "audio": "high",
+          "min": 0,
+          "max": 0.7,
+          "floor": 0.4,
+          "release": 0.1
+        }
       }
     }
   ]

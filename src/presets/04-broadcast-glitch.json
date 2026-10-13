@@ -3,22 +3,33 @@
   "name": "Broadcast glitch",
   "ramp": "blocks",
   "polarity": "light-on-dark",
-  "color": { "mode": "mono" },
+  "color": {
+    "mode": "mono"
+  },
   "chain": [
     {
       "effect": "glitch-rows",
-      "params": { "rate": 8, "amount": 0.12, "band": 2, "maxShift": 18 },
-      "mix": { "lfo": "square", "freq": 0.3, "min": 0, "max": 1 }
+      "params": {
+        "rate": 8,
+        "amount": 0.12,
+        "band": 2,
+        "maxShift": 18
+      },
+      "mix": {
+        "lfo": "square",
+        "freq": 0.3,
+        "min": 0,
+        "max": 1
+      }
     },
-    { "effect": "shake", "params": { "mode": "jitter", "amplitude": 0.4, "frequency": 15 } },
     {
       "effect": "pulse",
-      "params": { "shape": "global", "target": "contrast", "frequency": 0.7, "amount": 0.25 }
-    },
-    {
-      "effect": "erosion",
-      "params": { "threshold": 0.3, "softness": 0.05, "scale": 6, "speed": 1.2, "mode": "darken" },
-      "mix": 0.6
+      "params": {
+        "shape": "global",
+        "target": "contrast",
+        "frequency": 0.7,
+        "amount": 0.4
+      }
     }
   ]
 }

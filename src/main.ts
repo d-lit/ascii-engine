@@ -70,6 +70,7 @@ import { CentersOverlay } from './ui/centers-overlay.ts';
 import { createPanelTabs } from './ui/panel-tabs.ts';
 import { formatClock, TransportBar } from './ui/transport.ts';
 import { AudioPlayer } from './audio/player.ts';
+import { BandMeters } from './ui/band-meters.ts';
 import type { AudioFeed } from './pipeline/modulation.ts';
 import { DebugOverlay } from './ui/debug-overlay.ts';
 import { ChainPanel, type ViewSettings } from './ui/panel.ts';
@@ -277,6 +278,7 @@ function frame(rawDt: number): void {
   // With a track playing the picture follows what is heard (SPEC 10.1).
   if (heard >= 0) dt = Math.min(Math.max(heard - pipeline.ctx.time, 0), MAX_DT);
   transport.update(playing, recorder.recording, pipeline.ctx.time, scrubLength());
+  meters.update(player.bands, player.timing, pipeline.ctx.time);
   if (live) input.tick(dt);
   if (live && recorder.recording) {
     // Pointer as this frame will see it, against the time the frame will have.
@@ -849,6 +851,7 @@ function renderAudioControls(): void {
     }, 'remove the track'));
   }
   audioControls.replaceChildren(head);
+  meters.el.hidden = buffer === null;
   if (buffer === null) {
     audioControls.append(hint('Plays with the transport and goes into recordings and renders. Not saved in presets.'));
     return;
@@ -877,7 +880,8 @@ function renderAudioControls(): void {
   );
 }
 
-audioBox.append(audioControls, audioFile);
+const meters = new BandMeters();
+audioBox.append(audioControls, meters.el, audioFile);
 renderAudioControls();
 applyBackdrop();
 

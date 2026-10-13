@@ -543,3 +543,39 @@ body {
   width: clamp(80px, 22vw, 260px);
   accent-color: var(--accent);
 }
+
+/* Band meters in the audio section (DECISIONS 028). */
+#panel .band-meters {
+  margin: 6px 0 4px;
+}
+
+#panel .band-meter {
+  display: grid;
+  grid-template-columns: 3.5em 1fr 3em;
+  align-items: center;
+  gap: 8px;
+  margin: 3px 0;
+  color: var(--muted);
+}
+
+#panel .band-track {
+  position: relative;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--border);
+  /* Marks at a quarter, half and three quarters, to read thresholds against. */
+  background-image: linear-gradient(90deg, transparent calc(25% - 1px), var(--panel-bg) calc(25% - 1px), var(--panel-bg) 25%, transparent 25%, transparent calc(50% - 1px), var(--panel-bg) calc(50% - 1px), var(--panel-bg) 50%, transparent 50%, transparent calc(75% - 1px), var(--panel-bg) calc(75% - 1px), var(--panel-bg) 75%, transparent 75%);
+  overflow: hidden;
+}
+
+#panel .band-bar {
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  opacity: 0.85;
+}
+
+#panel .band-meter output {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
