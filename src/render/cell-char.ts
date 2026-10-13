@@ -21,6 +21,11 @@ export function resolveCellChar(
   if (a < ALPHA_EPS) return 0;
   let code = work.charOverride[i]!;
   if (code === 0 && useSourceChars) code = work.char[i]!;
-  if (code === 0) code = quantize(work.lum[i]!, a, ramp, polarity, mode);
+  if (code === 0) {
+    // Per-cell ramp (DECISIONS 030): falls back to the main ramp when absent.
+    const sel = work.rampSel[i]!;
+    const r = sel === 0 || ramp.alt === undefined ? ramp : (ramp.alt[sel - 1] ?? ramp);
+    code = quantize(work.lum[i]!, a, r, polarity, mode);
+  }
   return code;
 }

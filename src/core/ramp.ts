@@ -9,6 +9,11 @@ export interface Ramp {
   /** Raw densities that map to 0 and 1; places outside glyphs on this scale (DECISIONS 011). */
   rawMin: number;
   rawMax: number;
+  /**
+   * The built-in ramps measured for the same font, in RAMP_NAMES order:
+   * a cell with `rampSel` k > 0 is quantized with `alt[k - 1]` (DECISIONS 030).
+   */
+  alt?: readonly Ramp[];
 }
 
 /** Raw ink coverage of a glyph, 0..1. Analytic for block glyphs. */
@@ -25,6 +30,9 @@ export interface FontSpec {
 }
 
 export type RampName = 'blocks' | 'classic' | 'long' | 'binary' | 'dots';
+
+/** Order of the built-in ramps for per-cell selection: `rampSel` k means RAMP_NAMES[k - 1]. */
+export const RAMP_NAMES: readonly RampName[] = ['blocks', 'classic', 'long', 'binary', 'dots'];
 
 export const BUILTIN_RAMP_CHARS: Record<RampName, string> = {
   blocks: ' \u2591\u2592\u2593\u2588',
@@ -144,6 +152,21 @@ export function measureRamp(chars: string, font: FontSpec): Ramp {
   const ramp = makeRamp(chars, Array.from(chars, measure));
   rampCache.set(key, ramp);
   return ramp;
+}
+
+/**
+ * `chars` measured for the font, carrying every built-in ramp for the same
+ * font as `alt` — what renderers and exporters quantize with (DECISIONS 030).
+ */
+export function measureRampSet(chars: string, font: FontSpec): Ramp {
+  // Cached like measureRamp: callers compare ramps by identity.
+  const key = `set|${chars}|${fontKey(font)}`;
+  const cached = rampCache.get(key);
+  if (cached) return cached;
+  const main = measureRamp(chars, font);
+  const set = { ...main, alt: RAMP_NAMES.map((name) => measureRamp(BUILTIN_RAMP_CHARS[name], font)) };
+  rampCache.set(key, set);
+  return set;
 }
 
 /** Polarity maps image brightness to glyph ink and back; it is an involution. */

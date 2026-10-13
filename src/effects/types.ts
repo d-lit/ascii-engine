@@ -14,6 +14,8 @@ export interface CellRef {
   g: number;
   b: number;
   char: number;
+  /** Ramp of the cell: 0 = the picture's, k = RAMP_NAMES[k - 1] (DECISIONS 030). Follows `char` under mix. */
+  ramp: number;
   /** Background plate 0..255 (alpha in `pa`); meaningful in the post stage only. */
   pr: number;
   pg: number;

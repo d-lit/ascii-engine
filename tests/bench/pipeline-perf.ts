@@ -13,6 +13,9 @@ import { wave } from '../../src/effects/cell/wave.ts';
 import { hueCycle } from '../../src/effects/cell/hue-cycle.ts';
 import { tint } from '../../src/effects/cell/tint.ts';
 import { glow } from '../../src/effects/cell/glow.ts';
+import { bands } from '../../src/effects/cell/bands.ts';
+import { field } from '../../src/effects/cell/field.ts';
+import { rings } from '../../src/effects/cell/rings.ts';
 import { glitchRows } from '../../src/effects/displace/glitch-rows.ts';
 import { lens } from '../../src/effects/displace/lens.ts';
 import { liquid } from '../../src/effects/displace/liquid.ts';
@@ -44,7 +47,9 @@ function makePipeline(defs: AnyEffectDef[], opts: AddOptions = {}): Pipeline {
   const p = new Pipeline(src, { cellAspect: 0.55, polarity: 'light-on-dark' }, pointer);
   // Long scramble keeps decode in its most expensive state.
   for (const def of defs) {
-    p.add(def, def === decode ? { speed: 400, scramble: 30, jitter: 0 } : {}, opts);
+    // The field constructor runs its dearest shape (plasma) with dither.
+    const values = def === decode ? { speed: 400, scramble: 30, jitter: 0 } : def === field ? { shape: 'plasma', op: 'dither' } : {};
+    p.add(def, values as Record<string, number>, opts);
   }
   return p;
 }
@@ -92,6 +97,9 @@ const cases: Array<[string, AnyEffectDef[], AddOptions?]> = [
   ['tint', [tint]],
   ['hue-cycle', [hueCycle]],
   ['glow', [glow]],
+  ['field (plasma, dither)', [field]],
+  ['bands', [bands]],
+  ['rings', [rings]],
 ];
 
 // ONLY=<case name> runs a single case, e.g. with --trace-gc to count scavenges.

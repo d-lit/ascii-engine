@@ -134,6 +134,7 @@ export class Pipeline {
     g: 0,
     b: 0,
     char: 0,
+    ramp: 0,
     pr: 0,
     pg: 0,
     pb: 0,
@@ -489,6 +490,7 @@ export class Pipeline {
     const nFns = displaceFns.length;
 
     work.charOverride.fill(0);
+    work.rampSel.fill(0);
 
     // Hot loop: sample indices are clamped into the grid, fn index < nFns.
     let i = 0;
@@ -559,7 +561,7 @@ export class Pipeline {
     cellMasks: ReadonlyArray<Float32Array | null>,
   ): void {
     const { work, cell, ctx } = this;
-    const { lum, alpha, color, plate, charOverride, cols, rows } = work;
+    const { lum, alpha, color, plate, charOverride, rampSel, cols, rows } = work;
     const nFns = cellFns.length;
 
     // Hot loop: indices bounded by cols*rows, fn index by nFns.
@@ -569,6 +571,7 @@ export class Pipeline {
         cell.lum = lum[i]!;
         cell.alpha = alpha[i]!;
         cell.char = charOverride[i]!;
+        cell.ramp = rampSel[i]!;
         if (color !== null) {
           cell.r = color[i * 3]!;
           cell.g = color[i * 3 + 1]!;
@@ -597,6 +600,7 @@ export class Pipeline {
           const bg = cell.g;
           const bb = cell.b;
           const bc = cell.char;
+          const bramp = cell.ramp;
           const bpr = cell.pr;
           const bpg = cell.pg;
           const bpb = cell.pb;
@@ -611,12 +615,16 @@ export class Pipeline {
           cell.r = br + (cell.r - br) * w;
           cell.g = bg + (cell.g - bg) * w;
           cell.b = bb + (cell.b - bb) * w;
-          if (w <= 0.5) cell.char = bc;
+          if (w <= 0.5) {
+            cell.char = bc;
+            cell.ramp = bramp;
+          }
         }
 
         lum[i] = cell.lum;
         alpha[i] = cell.alpha;
         charOverride[i] = cell.char;
+        rampSel[i] = cell.ramp;
         if (color !== null) {
           color[i * 3] = cell.r;
           color[i * 3 + 1] = cell.g;

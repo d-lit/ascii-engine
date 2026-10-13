@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "name": "Op art",
+  "ramp": "classic",
+  "polarity": "light-on-dark",
+  "color": { "mode": "mono" },
+  "chain": [
+    {
+      "effect": "bands",
+      "params": { "op": "invert", "period": 26, "thickness": 13, "angle": 30, "spin": 4, "speed": 6 }
+    }
+  ]
+}

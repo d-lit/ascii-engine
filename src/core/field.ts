@@ -58,6 +58,11 @@ export interface WorkBuffer {
    * (its data stays for the sprite). Written by systems (SPEC 6.3).
    */
   hidden: Uint8Array;
+  /**
+   * Which ramp quantizes the cell: 0 = the picture's ramp, k = RAMP_NAMES[k - 1]
+   * (DECISIONS 030). Reset every frame, like charOverride.
+   */
+  rampSel: Uint8Array;
   /** One slot per cell: a system moves at most every cell. */
   sprites: SpritePool;
   /**
@@ -109,6 +114,7 @@ export function createWorkBuffer(cols: number, rows: number, opts: FieldOptions 
     char: new Uint16Array(n),
     charOverride: new Uint16Array(n),
     hidden: new Uint8Array(n),
+    rampSel: new Uint8Array(n),
     sprites: createSpritePool(n),
     spriteFade: 0,
   };
@@ -133,4 +139,5 @@ export function copyFieldToWork(src: Field, dst: WorkBuffer): void {
   else dst.char.fill(0);
 
   dst.charOverride.fill(0);
+  dst.rampSel.fill(0);
 }

@@ -1,4 +1,7 @@
+import { bands } from './cell/bands.ts';
 import { decode } from './cell/decode.ts';
+import { field } from './cell/field.ts';
+import { rings } from './cell/rings.ts';
 import { erosion } from './cell/erosion.ts';
 import { glow } from './cell/glow.ts';
 import { hueCycle } from './cell/hue-cycle.ts';
@@ -18,7 +21,7 @@ import { getEffect, registerEffect } from './registry.ts';
 
 /** Registers every built-in effect once; safe to call repeatedly. */
 export function registerBuiltinEffects(): void {
-  for (const def of [ripple, swirl, lens, liquid, glitchRows, shake, wave, pulse, erosion, decode, tint, hueCycle, glow, particles, trails, sand]) {
+  for (const def of [ripple, swirl, lens, liquid, glitchRows, shake, wave, pulse, erosion, decode, tint, hueCycle, glow, field, bands, rings, particles, trails, sand]) {
     if (getEffect(def.id) === undefined) registerEffect(def);
   }
 }

@@ -16,7 +16,7 @@ import { importText, normalizeText } from './core/import-text.ts';
 import {
   BUILTIN_RAMP_CHARS,
   createDensityMeasurer,
-  measureRamp,
+  measureRampSet,
   type QuantizeMode,
   type Ramp,
   type RampName,
@@ -210,7 +210,7 @@ function rebuild(): void {
   // Cell size depends on the grid; ramp densities depend on the cell size.
   renderer.resize(cols, rows, CELL_ASPECT, canvasFrame());
   const font = renderer.font;
-  ramp = measureRamp(BUILTIN_RAMP_CHARS[settings.ramp], font);
+  ramp = measureRampSet(BUILTIN_RAMP_CHARS[settings.ramp], font);
 
   let next: Field;
   if (source.kind === 'image') {

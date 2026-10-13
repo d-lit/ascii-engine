@@ -10,10 +10,11 @@ Turn a picture into living ASCII art in the browser: ripples that follow the cur
 
 - **Any source.** Drop a photo, or a plain-text ASCII art file (`.txt`, `.asc`, `.nfo`).
 - **Proper ASCII.** Characters are chosen by measured glyph density, not by a naive brightness ladder. Five character ramps, light-on-dark or dark-on-light, block glyphs (`░▒▓█`) drawn procedurally so they tile without seams.
-- **16 effects in a chain.**
+- **19 effects in a chain.**
   - *Displace* — `ripple`, `swirl`, `lens`, `liquid`, `glitch-rows`, `shake`;
   - *Cell* — `wave`, `pulse`, `erosion`, `decode`;
   - *Colour* — `tint`, `hue-cycle`, `glow`;
+  - *Shape* — `bands`, `rings` and the `field` constructor: hard-edged geometry that inverts, fills, erases, dithers or switches the character ramp inside it;
   - *System* — `particles`: the picture assembles from scattered characters, the cursor pushes them aside, clicks blast them apart, a centre push follows the bass, springs bring them home; `trails`: echoes of moving details and tails behind flying characters; `sand`: the picture crumbles into a pile and rebuilds itself.
 
   Add any of them (even twice), reorder, mix, mask.
@@ -21,7 +22,7 @@ Turn a picture into living ASCII art in the browser: ripples that follow the cur
 - **Canvas.** Pick a pixel frame — 1080×1080, 1080×1350, 1080×1920, 1920×1080 or your own — and crop both the source and the backdrop into it (fit, position, zoom). Screen, recording, render and PNG all use it.
 - **Colour and layers.** Glyph colour: mono, the photo's own colours, or a gradient by brightness. Cell background plates. Backdrop: theme colour, any colour (chroma key), transparent, or an image — including the source photo itself, so effects can dissolve the ASCII into the picture.
 - **Music.** Load a track: it plays with a transport (pause, frame step, seek), any parameter can follow its bass, mids, highs or loudness — explicitly, in the panel, the same on screen and in the render, with the sound in the video.
-- **Presets.** Eighteen built-in looks, save and load your own as JSON, or press *random* to explore.
+- **Presets.** Twenty built-in looks, save and load your own as JSON, or press *random* to explore.
 - **Export.**
   - text (`.txt` / clipboard);
   - PNG, with transparency;

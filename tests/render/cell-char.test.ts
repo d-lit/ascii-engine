@@ -28,3 +28,22 @@ describe('resolveCellChar', () => {
     expect(resolveCellChar(work, 3, ramp, 'light-on-dark', true, 'nearest-density')).toBe(0);
   });
 });
+
+describe('per-cell ramp (DECISIONS 030)', () => {
+  it('quantizes a cell with its selected built-in ramp; 0 keeps the main one', async () => {
+    const { createWorkBuffer } = await import('../../src/core/field.ts');
+    const { makeRamp } = await import('../../src/core/ramp.ts');
+    const { resolveCellChar } = await import('../../src/render/cell-char.ts');
+    const blocks = makeRamp(' █', [0, 1]);
+    const main = { ...makeRamp(' @', [0, 1]), alt: [blocks] };
+    const w = createWorkBuffer(2, 1);
+    w.lum.fill(1);
+    w.alpha.fill(1);
+    w.rampSel[1] = 1;
+    expect(resolveCellChar(w, 0, main, 'light-on-dark', true, 'nearest-density')).toBe('@'.charCodeAt(0));
+    expect(resolveCellChar(w, 1, main, 'light-on-dark', true, 'nearest-density')).toBe('█'.charCodeAt(0));
+    // charOverride still wins.
+    w.charOverride[1] = 'Z'.charCodeAt(0);
+    expect(resolveCellChar(w, 1, main, 'light-on-dark', true, 'nearest-density')).toBe('Z'.charCodeAt(0));
+  });
+});

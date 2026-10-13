@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "name": "Sonar",
+  "ramp": "classic",
+  "polarity": "light-on-dark",
+  "color": {
+    "mode": "gradient",
+    "stops": [
+      { "pos": 0, "color": "#001a0e" },
+      { "pos": 0.6, "color": "#00a86b" },
+      { "pos": 1, "color": "#c8ffe4" }
+    ]
+  },
+  "chain": [
+    {
+      "effect": "rings",
+      "params": {
+        "op": "ramp",
+        "ramp": "blocks",
+        "center": { "path": { "kind": "wander", "center": { "x": 0.5, "y": 0.5 }, "radius": 0.2, "speed": 0.15 } },
+        "period": 24,
+        "thickness": { "audio": "bass", "min": 3, "max": 10, "floor": 0.4, "release": 0.15 },
+        "speed": 12
+      }
+    }
+  ]
+}

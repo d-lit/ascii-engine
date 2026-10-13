@@ -7,7 +7,7 @@
 import { parseHex } from '../core/color.ts';
 import type { FieldMeta } from '../core/field.ts';
 import { importPixels } from '../core/import-image.ts';
-import { BUILTIN_RAMP_CHARS, measureRamp } from '../core/ramp.ts';
+import { BUILTIN_RAMP_CHARS, measureRampSet } from '../core/ramp.ts';
 import { registerBuiltinEffects } from '../effects/builtin.ts';
 import { getEffect } from '../effects/registry.ts';
 import { createPointer, MAX_DT, Pipeline } from '../pipeline/pipeline.ts';
@@ -126,7 +126,7 @@ async function runScenario(s: Scenario, renderer: Canvas2DRenderer, log: (line: 
   renderer.resize(COLS, rows, CELL_ASPECT);
   const theme = THEMES[preset.polarity];
   renderer.setBackdrop(preset.backdrop);
-  const ramp = measureRamp(BUILTIN_RAMP_CHARS[preset.ramp], renderer.font);
+  const ramp = measureRampSet(BUILTIN_RAMP_CHARS[preset.ramp], renderer.font);
   const pointer = createPointer();
   const pipeline = new Pipeline(field, meta, pointer);
   pipeline.setColor(preset.color, parseHex(theme.fg));

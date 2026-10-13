@@ -1,7 +1,7 @@
 import type { Rgb } from '../core/color.ts';
 import type { Polarity, WorkBuffer } from '../core/field.ts';
 import type { Crop, PlacedRect } from '../core/placement.ts';
-import { measureRamp, type QuantizeMode } from '../core/ramp.ts';
+import { measureRampSet, type QuantizeMode } from '../core/ramp.ts';
 import { getAtlas } from '../render/atlas.ts';
 import { paintFrame, prepareBackdrop, type Backdrop, type BackdropImage } from '../render/backdrop.ts';
 import { fillFrame, layoutFrame, pictureRect } from '../render/canvas2d.ts';
@@ -50,7 +50,7 @@ export function createFramePainter(look: FrameLook): FramePainter {
   const { cols, rows, width, height } = look;
   const layout = look.fill ? fillFrame(cols, rows, width, height) : layoutFrame(cols, rows, look.cellAspect, width, height);
   const font = { family: look.family, weight: look.weight, cellW: layout.cellW, cellH: layout.cellH };
-  const ramp = measureRamp(look.rampChars, font);
+  const ramp = measureRampSet(look.rampChars, font);
   const atlas = getAtlas(font);
   const canvas = document.createElement('canvas');
   canvas.width = width;
