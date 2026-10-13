@@ -40,6 +40,7 @@ To run it locally (Node 24, Yarn 1):
 yarn install
 yarn dev          # development server
 yarn run check    # type check + tests
+yarn run bench:browser  # performance in a real Chromium window (~40 s)
 yarn build        # production build into dist/
 ```
 

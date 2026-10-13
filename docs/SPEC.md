@@ -377,6 +377,7 @@ export interface Renderer {
 
 - 200×100 ячеек: ≤ 6 мс CPU на кадр без систем частиц, ≤ 10 мс с частицами (все непустые ячейки).
 - 0 аллокаций за кадр в установившемся режиме. CPU-часть pipeline проверяется в Node: `node tests/bench/pipeline-perf.ts` (время) и счётчик сборок через `--trace-gc` (аллокации, DECISIONS 013); рендер — в DevTools Performance.
+- Браузер: `yarn run bench:browser` (DECISIONS 027) — сценарии `src/bench/bench.ts` в настоящем Chromium, fps и CPU кадра по стадиям.
 - Перед оптимизацией — замер. После — цифры до/после в отчёте.
 
 ## 12.1 Экспорт

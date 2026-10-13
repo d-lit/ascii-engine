@@ -171,3 +171,26 @@ describe('particles on beats', () => {
     expect(w.sprites.count).toBeGreaterThan(settling);
   });
 });
+
+describe('systems and a new picture', () => {
+  it('start over on a picture of another size: no stale sprites, no errors', async () => {
+    const { sand } = await import('../../src/effects/system/sand.ts');
+    const { trails } = await import('../../src/effects/system/trails.ts');
+    const a = createField(40, 20);
+    a.alpha.fill(1);
+    const pointer = createPointer();
+    const p = new Pipeline(a, { cellAspect: 0.5, polarity: 'light-on-dark' }, pointer);
+    p.add(particles, { intro: 'scatter' });
+    p.add(sand, { crumble: 0.2 });
+    p.add(trails);
+    for (let i = 0; i < 30; i++) p.frame(1 / 60);
+    const b = createField(13, 7);
+    b.alpha.fill(1);
+    p.setSource(b, { cellAspect: 0.5, polarity: 'light-on-dark' });
+    let w = p.frame(1 / 60);
+    for (let s = 0; s < w.sprites.count; s++) expect(w.sprites.src[s]!).toBeLessThan(13 * 7);
+    expect(w.hidden.length).toBe(13 * 7);
+    for (let i = 0; i < 600; i++) w = p.frame(1 / 60);
+    expect(w.cols).toBe(13);
+  });
+});

@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ASCII Engine bench</title>
+    <style>
+      html, body { margin: 0; background: #0b0b0d; color: #e8e6e3; font: 12px/1.4 ui-monospace, monospace; }
+      #stage { width: 700px; height: 660px; display: flex; align-items: center; justify-content: center; }
+      #log { position: fixed; top: 8px; left: 8px; white-space: pre; background: rgb(0 0 0 / 0.7); padding: 6px 8px; }
+    </style>
+  </head>
+  <body>
+    <div id="stage"><canvas id="view"></canvas></div>
+    <pre id="log">starting…</pre>
+    <script type="module" src="/src/bench/bench.ts"></script>
+  </body>
+</html>
